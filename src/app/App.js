@@ -1,0 +1,22 @@
+import { registerRoute, startRouter } from './router.js';
+import { subscribe } from './state.js';
+import { ProjectsPage } from '../pages/ProjectsPage.js';
+import { PassportPage } from '../pages/PassportPage.js';
+import { ZonesPage } from '../pages/ZonesPage.js';
+import { EstimatePage } from '../pages/EstimatePage.js';
+import { CheckPage } from '../pages/CheckPage.js';
+import { ProposalPage } from '../pages/ProposalPage.js';
+import { LibraryPage } from '../pages/LibraryPage.js';
+import { SettingsPage } from '../pages/SettingsPage.js';
+
+const root = document.getElementById('app');
+registerRoute('projects', ProjectsPage);
+registerRoute('passport', PassportPage);
+registerRoute('zones', ZonesPage);
+registerRoute('estimate', EstimatePage);
+registerRoute('check', CheckPage);
+registerRoute('proposal', ProposalPage);
+registerRoute('library', LibraryPage);
+registerRoute('settings', SettingsPage);
+startRouter(root);
+subscribe(() => {});

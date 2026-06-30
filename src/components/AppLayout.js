@@ -1,0 +1,41 @@
+import { currentRoute, navigate } from '../app/router.js';
+import { getProject, persistProject, setProject } from '../app/state.js';
+import { createAndSaveProject } from '../app/storage.js';
+import { exportProject } from '../app/storage.js';
+import { downloadText, toast } from '../utils/dom.js';
+import { TopSummary } from './TopSummary.js';
+
+const userRoutes = [
+  ['projects','Проекты'], ['passport','Паспорт проекта'], ['zones','Зоны'], ['estimate','Смета'], ['check','Проверка'], ['proposal','КП / экспорт']
+];
+const expertRoutes = [['library','Библиотека'], ['settings','Настройки']];
+
+export function AppLayout(contentHtml) {
+  const p = getProject();
+  return `<div class="appShell">
+    <div class="topbar">
+      <section class="brand"><div class="brandMark">V</div><div><h1>AV пресейл-калькулятор ВИЖУ</h1><p>Архитектурный этап: проекты, страницы, модули, localStorage, JSON.</p></div></section>
+      <section class="panel topActions">
+        ${p ? `<button class="btn ghost" data-action="save-current">Сохранить</button><button class="btn ghost" data-action="export-current">JSON</button>` : ''}
+        <button class="btn primary" data-action="new-project">Новый расчёт</button>
+      </section>
+    </div>
+    ${TopSummary(p)}
+    <div class="layout">
+      <aside class="panel sidebar">
+        <div class="navGroupTitle">Пользовательский сценарий</div>${nav(userRoutes)}
+        <div class="navGroupTitle">Экспертная зона</div>${nav(expertRoutes)}
+      </aside>
+      <main class="panel content"><div class="page">${contentHtml}</div></main>
+    </div>
+  </div>`;
+}
+function nav(routes){ const active=currentRoute(); return routes.map(([id,name])=>`<a href="#/${id}" data-route="${id}" class="navLink ${active===id?'active':''}"><span>${name}</span></a>`).join(''); }
+export function bindLayoutActions(root) {
+  root.querySelector('[data-action="new-project"]')?.addEventListener('click', () => { const p = createAndSaveProject(); setProject(p); navigate('passport'); });
+  root.querySelector('[data-action="save-current"]')?.addEventListener('click', () => { persistProject(); toast('Проект сохранён'); });
+  root.querySelector('[data-action="export-current"]')?.addEventListener('click', () => {
+    const p = getProject(); if (!p) return;
+    downloadText(`${p.name || 'project'}.json`, exportProject(p));
+  });
+}
