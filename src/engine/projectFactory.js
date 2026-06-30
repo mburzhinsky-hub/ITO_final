@@ -1,5 +1,6 @@
 import { createId } from '../utils/ids.js';
 import { DEFAULT_SETTINGS } from '../data/defaultSettings.js';
+import { normalizeProposalOptions } from './proposalOptions.js';
 import { normalizeCurrency, normalizePriceMode } from './currency.js';
 
 export const PROJECT_STATUSES = [
@@ -30,8 +31,14 @@ export function createProject(seed = {}) {
     zones: seed.zones || [],
     estimateItems: seed.estimateItems || [],
     acceptedWarnings: seed.acceptedWarnings || [],
+    proposalOptions: normalizeProposalOptions(seed.proposalOptions || {}),
     settingsOverrides: seed.settingsOverrides || {},
-    notes: seed.notes || ''
+    notes: seed.notes || '',
+    schemaVersion: seed.schemaVersion || 6,
+    appVersion: seed.appVersion || 'stage6-export-proposal',
+    proposalNumber: seed.proposalNumber || '',
+    managerContact: seed.managerContact || '',
+    customerContact: seed.customerContact || ''
   };
 }
 
@@ -98,6 +105,7 @@ export function normalizeProject(raw) {
   project.zones = (raw?.zones || []).map(createZone);
   project.estimateItems = (raw?.estimateItems || raw?.estimate || []).map(createEstimateItem);
   project.acceptedWarnings = raw?.acceptedWarnings || [];
+  project.proposalOptions = normalizeProposalOptions(raw?.proposalOptions || project.proposalOptions || {});
   project.passport.targetBudgetIncludesVat = project.passport.targetBudgetIncludesVat ?? DEFAULT_SETTINGS.targetBudgetIncludesVat;
   return project;
 }

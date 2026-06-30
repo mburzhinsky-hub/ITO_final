@@ -85,3 +85,25 @@ python3 -m http.server 8080
 - `src/engine/validation.js` — проверки полноты AV-системы по зоне, категории и шаблону.
 
 Подробности см. в `STAGE4_ZONE_MODEL_REPORT.md`.
+
+## Stage 6 — КП и экспорт
+
+Добавлен шестой этап: безопасное разделение внутренней сметы и клиентского КП, документный предпросмотр КП, пресеты детализации, HTML/PDF/печать, Excel-compatible workbook и перенос проектов через JSON с валидацией и миграцией.
+
+Ключевые файлы этапа:
+
+- `src/engine/proposalBuilder.js`
+- `src/engine/proposalOptions.js`
+- `src/export/exportJson.js`
+- `src/export/exportHtml.js`
+- `src/export/exportPrint.js`
+- `src/export/exportExcel.js`
+- `src/pages/ProposalPage.js`
+- `src/components/ProposalPreview.js`
+- `src/components/ProposalOptionsPanel.js`
+- `src/components/ExportActions.js`
+- `src/components/ImportProjectDialog.js`
+- `src/styles/proposal.css`
+- `src/styles/print.css`
+
+Подробный отчёт: `STAGE6_EXPORT_PROPOSAL_REPORT.md`.
