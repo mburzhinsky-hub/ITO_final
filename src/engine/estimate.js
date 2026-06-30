@@ -1,7 +1,39 @@
 import { CATALOG } from '../data/catalog.js';
+import { SUPPLIER_PRICE_CATALOG } from '../data/supplierPriceCatalog.js';
 import { createEstimateItem } from './projectFactory.js';
 import { normalizeCurrency, normalizePriceMode, convertToRub } from './currency.js';
 import { DEFAULT_SETTINGS } from '../data/defaultSettings.js';
+
+const SOURCE_CATALOG = [...SUPPLIER_PRICE_CATALOG, ...CATALOG];
+
+function catalogDedupeKey(item = {}) {
+  const norm = value => String(value || '').toLowerCase().replace(/[^a-zа-я0-9]+/gi, '');
+  const composite = [norm(item.brand), norm(item.model), norm(item.article)].join('|');
+  return composite.replace(/\|/g, '') ? composite : norm(item.name).slice(0, 100);
+}
+
+function supplierPriority(item = {}) {
+  return Number(item.supplierPriority || (item.supplier ? 1 : 0));
+}
+
+function buildLibrary(items = []) {
+  const byKey = new Map();
+  items.map(normalizeCatalogItem).forEach(item => {
+    const key = catalogDedupeKey(item);
+    const old = byKey.get(key);
+    const score = [supplierPriority(item), item.category !== 'Доп. оборудование' ? 1 : 0, item.currency === 'RUB' ? 1 : 0, Number(item.unitCost || 0) > 0 ? 1 : 0];
+    const oldScore = old ? [supplierPriority(old), old.category !== 'Доп. оборудование' ? 1 : 0, old.currency === 'RUB' ? 1 : 0, Number(old.unitCost || 0) > 0 ? 1 : 0] : [-1];
+    if (!old || score.join('|') > oldScore.join('|')) byKey.set(key, item);
+  });
+  return [...byKey.values()].sort(compareCatalogItems);
+}
+
+function compareCatalogItems(a, b) {
+  return supplierPriority(b) - supplierPriority(a)
+    || String(a.category || '').localeCompare(String(b.category || ''), 'ru')
+    || String(a.brand || '').localeCompare(String(b.brand || ''), 'ru')
+    || String(a.model || a.name || '').localeCompare(String(b.model || b.name || ''), 'ru');
+}
 
 export function normalizeCatalogItem(item) {
   const currency = item.currency || (item.imported ? 'USD' : 'RUB');
@@ -15,6 +47,9 @@ export function normalizeCatalogItem(item) {
     category: item.category || item.subcategory || 'Оборудование',
     unit: item.unit || 'шт.', scenario: item.scenario || 'base',
     types: item.types || [], note: item.note || item.description || '',
+    supplier: item.supplier || '',
+    supplierPriority: supplierPriority(item),
+    article: item.article || '',
     currency: normalizedCurrency,
     unitCost,
     price: unitCost,
@@ -22,7 +57,46 @@ export function normalizeCatalogItem(item) {
     priceMode
   };
 }
-export const LIBRARY = CATALOG.map(normalizeCatalogItem);
+export const LIBRARY = buildLibrary(SOURCE_CATALOG);
+
+export function recommendedCategoriesForZone(zone = {}) {
+  const purpose = String(zone.purpose || zone.type || '').toLowerCase();
+  const task = String(zone.primaryTask || '').toLowerCase();
+  const flags = zone.flags || {};
+  const categories = [];
+  const add = (...values) => values.forEach(v => { if (v && !categories.includes(v)) categories.push(v); });
+  if (purpose.includes('conference') || purpose.includes('meeting') || task.includes('conference')) add('ВКС-системы', 'Конференц-системы', 'Микрофоны', 'LCD-панели', 'DSP и усилители', 'Коммутация');
+  if (purpose.includes('hall') || purpose.includes('museum') || flags.content || task.includes('content')) add('LCD-панели', 'LED-экраны', 'Медиасерверы', 'Акустика', 'Коммутация');
+  if (purpose.includes('stage') || purpose.includes('event')) add('Акустика', 'DSP и усилители', 'Микрофоны', 'Свет', 'Коммутация');
+  if (purpose.includes('class') || purpose.includes('education')) add('Интерактивные панели', 'Проекторы', 'Микрофоны', 'Акустика', 'Коммутация');
+  if (purpose.includes('outdoor')) add('LED-экраны', 'Акустика', 'Сеть', 'Крепления и конструкции');
+  if (purpose.includes('vr') || task.includes('wow')) add('VR / AR', 'ПК', 'LCD-панели', 'Акустика');
+  if (flags.metal) add('Крепления и конструкции');
+  if (flags.delivery) add('Кабельная инфраструктура', 'Сеть');
+  add('LCD-панели', 'Акустика', 'Коммутация', 'Кабельная инфраструктура');
+  return categories;
+}
+
+function itemMatchesContext(item, zone, project, scenario) {
+  const types = item.types || [];
+  return (!types.length || types.includes(project.passport?.projectType) || types.includes(zone.type) || types.includes(zone.purpose));
+}
+
+function pickCatalogItemsForZone(zone, project, scenario, limit = 6) {
+  const categories = recommendedCategoriesForZone(zone);
+  const picked = [];
+  const seen = new Set();
+  categories.forEach(category => {
+    const candidate = LIBRARY.find(item => item.category === category && ['budget', scenario, 'base', 'premium'].includes(item.scenario) && itemMatchesContext(item, zone, project, scenario) && !seen.has(item.id));
+    if (candidate && picked.length < limit) { picked.push(candidate); seen.add(candidate.id); }
+  });
+  if (picked.length < limit) {
+    LIBRARY.filter(item => ['budget', scenario, 'base'].includes(item.scenario) && itemMatchesContext(item, zone, project, scenario) && !seen.has(item.id))
+      .slice(0, limit - picked.length).forEach(item => { picked.push(item); seen.add(item.id); });
+  }
+  return picked;
+}
+
 
 export function addCatalogItemToProject(project, catalogItem, zoneId = '', options = {}) {
   const item = createEstimateItem({
@@ -75,9 +149,7 @@ export function generateEstimateFromZones(project, options = {}) {
       report.skippedZones.push({ id: zone.id, name: zone.name, reason: 'Не выбран тип зоны' });
       return;
     }
-    const matching = LIBRARY
-      .filter(item => (!item.types?.length || item.types.includes(project.passport?.projectType) || item.types.includes(zone.type)) && ['budget', scenario, 'base'].includes(item.scenario))
-      .slice(0, 4);
+    const matching = pickCatalogItemsForZone(zone, project, scenario, 6);
     if (!matching.length) {
       report.skippedZones.push({ id: zone.id, name: zone.name, reason: 'Нет подходящих позиций каталога' });
       return;
