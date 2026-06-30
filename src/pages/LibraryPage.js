@@ -1,16 +1,17 @@
 import { AppLayout, bindLayoutActions } from '../components/AppLayout.js';
-import { ensureProject, persistProject } from '../app/state.js';
+import { ensureProject, persistProject, getSettings } from '../app/state.js';
 import { LIBRARY, addCatalogItemToProject } from '../engine/estimate.js';
 import { formatMoney } from '../utils/format.js';
+import { itemUnitCostRub } from '../engine/currency.js';
 import { toast } from '../utils/dom.js';
 
 export function LibraryPage(root) {
-  const p = ensureProject(); const q = new URLSearchParams(location.hash.split('?')[1] || ''); const search = q.get('q') || ''; const category = q.get('category') || 'all';
+  const p = ensureProject(); const settings = getSettings(); const q = new URLSearchParams(location.hash.split('?')[1] || ''); const search = q.get('q') || ''; const category = q.get('category') || 'all';
   const categories = ['all', ...new Set(LIBRARY.map(i=>i.category).filter(Boolean))].sort();
   const items = LIBRARY.filter(i => (category==='all'||i.category===category) && `${i.name} ${i.brand} ${i.model} ${i.category}`.toLowerCase().includes(search.toLowerCase())).slice(0,60);
   root.innerHTML = AppLayout(`<div class="pageHead"><div class="pageTitle"><h2>Библиотека</h2><p>Каталог оборудования физически вынесен в /src/data/catalog.js и не смешан с UI.</p></div><span class="badge lime">${LIBRARY.length} позиций</span></div>
   <div class="card"><div class="grid cols3"><label class="field"><span>Поиск</span><input data-lib-search value="${search}" placeholder="модель, бренд, категория"></label><label class="field"><span>Категория</span><select data-lib-category>${categories.map(c=>`<option value="${c}" ${c===category?'selected':''}>${c==='all'?'Все категории':c}</option>`).join('')}</select></label><label class="field"><span>Зона для добавления</span><select data-target-zone><option value="">Без зоны</option>${p.zones.map(z=>`<option value="${z.id}">${z.name}</option>`).join('')}</select></label></div></div>
-  <div class="separator"></div><div class="libraryGrid">${items.map(item=>`<article class="card itemCard"><div><div class="itemTitle">${item.name}</div><div class="muted">${item.brand} ${item.model}</div></div><div><span class="badge">${item.category}</span> <span class="badge">${item.scenario}</span></div><strong>${formatMoney(item.priceRub)}</strong><p class="muted">${item.note?.slice(0,160) || ''}</p><button class="btn primary small" data-add-library="${item.id}">Добавить в смету</button></article>`).join('')}</div>`);
+  <div class="separator"></div><div class="libraryGrid">${items.map(item=>`<article class="card itemCard"><div><div class="itemTitle">${item.name}</div><div class="muted">${item.brand} ${item.model}</div></div><div><span class="badge">${item.category}</span> <span class="badge">${item.scenario}</span> <span class="badge">${item.currency}/${item.priceMode}</span></div><strong>${formatMoney(itemUnitCostRub(item, settings))}</strong><div class="muted">${item.currency === 'USD' ? `$${Number(item.unitCost || 0).toLocaleString('ru-RU')} · по курсу ${settings.usdRate}` : `${formatMoney(item.unitCost)}`}</div><p class="muted">${item.note?.slice(0,160) || ''}</p><button class="btn primary small" data-add-library="${item.id}">Добавить в смету</button></article>`).join('')}</div>`);
   bindLayoutActions(root); bind(root,p,search,category);
 }
 function bind(root,p,search,category){

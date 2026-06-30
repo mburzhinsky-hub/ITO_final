@@ -1,10 +1,13 @@
 import { CATALOG } from '../data/catalog.js';
 import { createEstimateItem } from './projectFactory.js';
-import { normalizeCurrency, normalizePriceMode } from './currency.js';
+import { normalizeCurrency, normalizePriceMode, convertToRub } from './currency.js';
+import { DEFAULT_SETTINGS } from '../data/defaultSettings.js';
 
 export function normalizeCatalogItem(item) {
   const currency = item.currency || (item.imported ? 'USD' : 'RUB');
   const unitCost = Number(item.unitCost ?? item.price_usd ?? item.priceUsd ?? item.price_rub ?? item.priceRub ?? item.price ?? 0);
+  const normalizedCurrency = normalizeCurrency(currency);
+  const priceMode = item.imported || normalizedCurrency === 'USD' ? 'indexed' : 'fixed';
   return {
     id: item.id || `${item.brand || ''}_${item.model || item.name}`.replace(/\W+/g, '_').toLowerCase(),
     name: item.name || [item.brand, item.model].filter(Boolean).join(' ') || item.description || 'Позиция каталога',
@@ -12,9 +15,11 @@ export function normalizeCatalogItem(item) {
     category: item.category || item.subcategory || 'Оборудование',
     unit: item.unit || 'шт.', scenario: item.scenario || 'base',
     types: item.types || [], note: item.note || item.description || '',
-    currency: normalizeCurrency(currency),
+    currency: normalizedCurrency,
     unitCost,
-    priceMode: item.imported || currency === 'USD' ? 'indexed' : 'fixed'
+    price: unitCost,
+    priceRub: convertToRub(unitCost, normalizedCurrency, DEFAULT_SETTINGS),
+    priceMode
   };
 }
 export const LIBRARY = CATALOG.map(normalizeCatalogItem);
