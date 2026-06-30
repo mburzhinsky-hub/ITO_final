@@ -3,7 +3,7 @@ import { SUPPLIER_PRICE_CATALOG } from '../data/supplierPriceCatalog.js';
 import { createEstimateItem } from './projectFactory.js';
 import { normalizeCurrency, normalizePriceMode, convertToRub } from './currency.js';
 import { DEFAULT_SETTINGS } from '../data/defaultSettings.js';
-import { getZoneTemplate } from '../data/zoneTaxonomy.js';
+import { getZoneTemplate, canonicalSystemGroups } from '../data/zoneTaxonomy.js';
 
 const SOURCE_CATALOG = [...SUPPLIER_PRICE_CATALOG, ...CATALOG];
 
@@ -68,7 +68,8 @@ export function recommendedCategoriesForZone(zone = {}) {
   const categories = [];
   const add = (...values) => values.forEach(v => { if (v && !categories.includes(v)) categories.push(v); });
 
-  add(...(zone.requiredSystemGroups || []), ...(template?.requiredSystemGroups || []));
+  add(...canonicalSystemGroups([...(zone.requiredSystemGroups || []), ...(template?.requiredSystemGroups || [])]));
+  add(...(zone.recommendedItems || template?.recommendedItems || []).map(item => item.category || item.group));
   if (zone.categoryId === 'meeting-vcs' || purpose.includes('conference') || purpose.includes('meeting') || task.includes('conference')) add('ВКС-системы', 'Конференц-системы', 'Микрофоны', 'LCD-панели', 'DSP и усилители', 'Коммутация');
   if (zone.categoryId === 'museum-exposition' || purpose.includes('hall') || purpose.includes('museum') || flags.content || task.includes('content')) add('LCD-панели', 'LED-экраны', 'Медиасерверы', 'Акустика', 'Коммутация');
   if (zone.categoryId === 'events-conference' || purpose.includes('stage') || purpose.includes('event')) add('Акустика', 'DSP и усилители', 'Микрофоны', 'Свет', 'Коммутация');
@@ -80,7 +81,7 @@ export function recommendedCategoriesForZone(zone = {}) {
   if (flags.metal) add('Крепления и конструкции');
   if (flags.delivery) add('Кабельная инфраструктура', 'Сеть');
   add('LCD-панели', 'Акустика', 'Коммутация', 'Кабельная инфраструктура');
-  return categories;
+  return canonicalSystemGroups(categories);
 }
 
 function itemMatchesContext(item, zone, project, scenario) {
@@ -88,23 +89,36 @@ function itemMatchesContext(item, zone, project, scenario) {
   return (!types.length || types.includes(project.passport?.projectType) || types.includes(zone.type) || types.includes(zone.purpose));
 }
 
-function pickCatalogItemsForZone(zone, project, scenario, limit = 6) {
+function pickCatalogItemsForZone(zone, project, scenario, limit = 12) {
+  const template = getZoneTemplate(zone.templateId);
+  const recommendedItems = (zone.recommendedItems && zone.recommendedItems.length ? zone.recommendedItems : template?.recommendedItems || [])
+    .map(item => ({ ...item, category: canonicalSystemGroups([item.category || item.group])[0] }))
+    .sort((a, b) => (a.priority || 999) - (b.priority || 999));
   const categories = recommendedCategoriesForZone(zone);
   const picked = [];
   const seen = new Set();
-  categories.forEach(category => {
-    const candidate = LIBRARY.find(item => item.category === category && ['budget', scenario, 'base', 'premium'].includes(item.scenario) && itemMatchesContext(item, zone, project, scenario) && !seen.has(item.id));
-    if (candidate && picked.length < limit) { picked.push(candidate); seen.add(candidate.id); }
-  });
+
+  const pickByCategory = (category, qty = 1) => {
+    const candidate = LIBRARY.find(item => item.category === category && ['budget', scenario, 'base', 'premium'].includes(item.scenario) && itemMatchesContext(item, zone, project, scenario) && !seen.has(item.id))
+      || LIBRARY.find(item => item.category === category && ['budget', scenario, 'base', 'premium'].includes(item.scenario) && !seen.has(item.id));
+    if (candidate && picked.length < limit) {
+      picked.push({ ...candidate, recommendedQty: qty });
+      seen.add(candidate.id);
+    }
+  };
+
+  recommendedItems.forEach(item => pickByCategory(item.category, item.qty || 1));
+  categories.forEach(category => pickByCategory(category, 1));
+
   if (picked.length < Math.min(limit, categories.length)) {
     categories.forEach(category => {
       const candidate = LIBRARY.find(item => String(item.category || '').toLowerCase().includes(String(category).toLowerCase().split(' ')[0]) && ['budget', scenario, 'base', 'premium'].includes(item.scenario) && !seen.has(item.id));
-      if (candidate && picked.length < limit) { picked.push(candidate); seen.add(candidate.id); }
+      if (candidate && picked.length < limit) { picked.push({ ...candidate, recommendedQty: 1 }); seen.add(candidate.id); }
     });
   }
   if (picked.length < limit) {
     LIBRARY.filter(item => ['budget', scenario, 'base'].includes(item.scenario) && itemMatchesContext(item, zone, project, scenario) && !seen.has(item.id))
-      .slice(0, limit - picked.length).forEach(item => { picked.push(item); seen.add(item.id); });
+      .slice(0, limit - picked.length).forEach(item => { picked.push({ ...item, recommendedQty: 1 }); seen.add(item.id); });
   }
   return picked;
 }
@@ -187,7 +201,7 @@ export function generateEstimateFromZones(project, options = {}) {
       report.skippedZones.push({ id: zone.id, name: zone.name, reason: 'Не выбран тип зоны' });
       return;
     }
-    const matching = pickCatalogItemsForZone(zone, project, scenario, 6);
+    const matching = pickCatalogItemsForZone(zone, project, scenario, 12);
     if (!matching.length) {
       report.skippedZones.push({ id: zone.id, name: zone.name, reason: 'Нет подходящих позиций каталога' });
       return;
@@ -197,7 +211,7 @@ export function generateEstimateFromZones(project, options = {}) {
     matching.forEach(item => {
       const derivedKey = `${zone.id}:${item.id}`;
       if (existingKeys.has(derivedKey)) return;
-      addCatalogItemToProject(project, item, zone.id, { source: 'derived', isDerived: true, derivedKey });
+      addCatalogItemToProject(project, item, zone.id, { source: 'derived', isDerived: true, derivedKey, qty: item.recommendedQty || 1 });
       existingKeys.add(derivedKey);
       report.added += 1;
     });

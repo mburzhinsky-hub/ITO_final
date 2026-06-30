@@ -42,6 +42,70 @@ const PROJECT_CATEGORY_MAP = {
   vr: [CAT.interactive, CAT.education, CAT.museum, CAT.infra, CAT.screens]
 };
 
+
+const GROUP_CATEGORY_ALIASES = {
+  'Камеры': 'PTZ-камеры',
+  'Мониторы': 'LCD-панели',
+  'AV-стойки': 'Доп. оборудование',
+  'Питание': 'ИБП',
+  'Видеостены': 'LED-экраны',
+  'Проекционные экраны': 'Проекционные экраны'
+};
+
+const GROUP_ITEM_LABELS = {
+  'ВКС-системы': 'Комплект ВКС / endpoint',
+  'Конференц-системы': 'Конференц-система',
+  'LCD-панели': 'Профессиональная LCD-панель',
+  'LED-экраны': 'LED-экран / LED-процессор',
+  'Проекторы': 'Проектор',
+  'Проекционные экраны': 'Проекционный экран',
+  'Интерактивные панели': 'Интерактивная панель / touch display',
+  'Микрофоны': 'Микрофоны / радиосистема',
+  'Акустика': 'Акустические системы',
+  'DSP и усилители': 'DSP / усилитель',
+  'Коммутация': 'AV-коммутация',
+  'Сеть': 'Сетевое оборудование',
+  'Кабельная инфраструктура': 'Кабели и расходные материалы',
+  'Крепления и конструкции': 'Крепления / конструкции',
+  'Медиасерверы': 'Медиаплеер / медиасервер',
+  'ПК': 'ПК / workstation',
+  'PTZ-камеры': 'PTZ-камера',
+  'Свет': 'Световое оборудование',
+  'VR / AR': 'VR / AR комплект',
+  'Системы управления': 'Система управления',
+  'ИБП': 'ИБП / питание',
+  'Доп. оборудование': 'AV-стойка / аксессуары'
+};
+
+export function canonicalSystemGroup(group) {
+  return GROUP_CATEGORY_ALIASES[group] || group;
+}
+
+export function canonicalSystemGroups(groups = []) {
+  return [...new Set((groups || []).map(canonicalSystemGroup))];
+}
+
+function qtyForGroup(group, defaultArea = 25, zoneType = '') {
+  if (group === 'Микрофоны') return defaultArea >= 100 || /hall|stage|event/.test(zoneType) ? 4 : defaultArea >= 35 ? 2 : 1;
+  if (group === 'Акустика') return defaultArea >= 150 ? 6 : defaultArea >= 60 ? 4 : 2;
+  if (group === 'LCD-панели') return defaultArea >= 100 ? 2 : 1;
+  if (group === 'LED-экраны') return 1;
+  if (group === 'Кабельная инфраструктура') return 1;
+  if (group === 'Крепления и конструкции') return 1;
+  if (group === 'Сеть') return 1;
+  return 1;
+}
+
+function recommendedItemsFor(groups = [], defaultArea = 25, zoneType = '') {
+  return canonicalSystemGroups(groups).map((group, index) => ({
+    group,
+    category: group,
+    name: GROUP_ITEM_LABELS[group] || group,
+    qty: qtyForGroup(group, defaultArea, zoneType),
+    priority: index + 1
+  }));
+}
+
 const DEFAULT_TEMPLATES = {
   corporate: ['small-meeting-room','medium-meeting-room','reception-corporate','open-space','server-av-rack'],
   museum: ['museum-welcome-zone','exposition-hall','interactive-exposition','projection-zone','server-av-rack'],
@@ -192,14 +256,15 @@ const data = [
 ];
 
 export const ZONE_TEMPLATES = data.map((row, index) => {
-  const [categoryId, id, name, zoneType, defaultArea, defaultScenario, requiredSystemGroups, typicalWorks] = row;
+  const [categoryId, id, name, zoneType, defaultArea, defaultScenario, rawRequiredSystemGroups, typicalWorks] = row;
+  const requiredSystemGroups = canonicalSystemGroups(rawRequiredSystemGroups);
   const recommendedForProjectTypes = Object.entries(PROJECT_CATEGORY_MAP).filter(([,cats]) => cats.includes(categoryId)).map(([id]) => id);
   return {
     id, categoryId, name, zoneType, defaultArea, defaultScenario,
     description: defaultScenario,
     recommendedForProjectTypes,
     requiredSystemGroups,
-    recommendedItems: [],
+    recommendedItems: recommendedItemsFor(requiredSystemGroups, defaultArea, zoneType),
     requiredDependencies: dependenciesFor(requiredSystemGroups, typicalWorks),
     typicalWorks,
     requiresEngineerReview: requiredSystemGroups.some(g => /LED|Видеостены|Проекторы|Крепления|Питание|VR/.test(g)) || defaultArea >= 100,
@@ -266,6 +331,7 @@ export function createZoneSeedFromTemplate(template, projectTypeId = 'corporate'
     task: template.defaultScenario,
     scenario: template.defaultScenario,
     requiredSystemGroups: template.requiredSystemGroups,
+    recommendedItems: template.recommendedItems,
     requiredDependencies: template.requiredDependencies,
     typicalWorks: template.typicalWorks,
     requiresEngineerReview: template.requiresEngineerReview,

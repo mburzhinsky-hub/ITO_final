@@ -2,7 +2,7 @@ import { calculateProjectTotals, mergedSettings } from './pricing.js';
 import { calculateBudgetStatus } from './budget.js';
 import { normalizeCurrency } from './currency.js';
 import { num } from '../utils/format.js';
-import { getProjectZoneModel, getZoneCategory, getZoneTemplate } from '../data/zoneTaxonomy.js';
+import { getProjectZoneModel, getZoneCategory, getZoneTemplate, canonicalSystemGroups } from '../data/zoneTaxonomy.js';
 
 export function validateProject(project = {}, settingsInput = null) {
   const settings = settingsInput || mergedSettings(project);
@@ -52,7 +52,7 @@ export function validateEstimate(project = {}, settings = {}) {
   const zoneItemsByZone = items.reduce((acc, item) => { if (item.zoneId) (acc[item.zoneId] ||= []).push(item); return acc; }, {});
   (project.zones || []).forEach(zone => {
     const zoneItems = zoneItemsByZone[zone.id] || [];
-    const requiredGroups = zone.requiredSystemGroups || getZoneTemplate(zone.templateId)?.requiredSystemGroups || [];
+    const requiredGroups = canonicalSystemGroups(zone.requiredSystemGroups || getZoneTemplate(zone.templateId)?.requiredSystemGroups || []);
     requiredGroups.forEach(group => {
       const covered = zoneItems.some(item => String(item.category || '').toLowerCase().includes(String(group).toLowerCase()) || String(group).toLowerCase().includes(String(item.category || '').toLowerCase()));
       if (!covered && zoneItems.length) warnings.push(w(`zone-group-${zone.id}-${group}`, 'engineering', 'recommendation', 'AV-группа не закрыта в смете', `В зоне «${zone.name}» требуется группа «${group}», но в смете по этой зоне нет очевидной позиции этой категории.`, 'zone', zone.id, 'Проверить смету', 'open-estimate'));
