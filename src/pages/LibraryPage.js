@@ -2,7 +2,7 @@ import { AppLayout, bindLayoutActions } from '../components/AppLayout.js';
 import { PageHeader } from '../components/PageHeader.js';
 import { EmptyState } from '../components/EmptyState.js';
 import { ensureProject, persistProject, getSettings } from '../app/state.js';
-import { LIBRARY, addCatalogItemToProject } from '../engine/estimate.js';
+import { LIBRARY, addCatalogItemToProject, buildLibrary } from '../engine/estimate.js';
 import { createEstimateItem, createZone } from '../engine/projectFactory.js';
 import { toast } from '../utils/dom.js';
 import { LibraryFilters } from '../components/LibraryFilters.js';
@@ -13,22 +13,45 @@ import { catalogQualitySummary } from '../engine/catalogValidation.js';
 import { resolveMissingDependencies, createDependencyFallbackItem } from '../engine/dependencyResolver.js';
 import { getItemAlternatives, replacementImpact } from '../engine/alternativeResolver.js';
 
+let fullLibrary = null;
+let fullLibraryPromise = null;
+
+async function loadFullLibrary() {
+  if (fullLibrary) return fullLibrary;
+  if (!fullLibraryPromise) {
+    fullLibraryPromise = import('../data/supplierPriceCatalog.js').then(({ SUPPLIER_PRICE_CATALOG }) => {
+      fullLibrary = buildLibrary([...SUPPLIER_PRICE_CATALOG, ...LIBRARY]);
+      return fullLibrary;
+    });
+  }
+  return fullLibraryPromise;
+}
+
 export function LibraryPage(root) {
   const p = ensureProject();
   const settings = getSettings();
   const q = new URLSearchParams(location.hash.split('?')[1] || '');
   const state = readState(q);
   const tab = q.get('tab') || 'equipment';
-  const quality = catalogQualitySummary(LIBRARY);
-  const items = filterLibrary(LIBRARY, state).slice(0, 72);
+  const includeSuppliers = q.get('suppliers') === '1';
+  if (includeSuppliers && !fullLibrary) {
+    root.innerHTML = AppLayout(`${PageHeader({ title: 'Библиотека', description: 'Загружаем полный каталог поставщиков. Обычные страницы калькулятора больше не ждут этот тяжёлый файл.', actions: '<a class="btn ghost" href="#/library">Открыть быстрый каталог</a>' })}<section class="card"><h3>Загрузка прайс-листов</h3><p class="muted">Полный каталог вынесен в ленивую загрузку, чтобы остальные страницы открывались быстро.</p></section>`);
+    bindLayoutActions(root);
+    loadFullLibrary().then(() => LibraryPage(root)).catch(error => { console.error(error); toast('Не удалось загрузить полный каталог поставщиков'); location.hash = '#/library'; });
+    return;
+  }
+  const library = includeSuppliers ? fullLibrary : LIBRARY;
+  const quality = catalogQualitySummary(library);
+  const items = filterLibrary(library, state).slice(0, 72);
   const templates = filterTemplates(INSTALLATION_TEMPLATES, state).slice(0, 30);
   const deps = resolveMissingDependencies(p).slice(0, 12);
-  root.innerHTML = AppLayout(`${PageHeader({ title: 'Библиотека', description: 'Экспертная библиотека оборудования, зависимостей, альтернатив и шаблонов инсталляций. Основной сценарий калькулятора не перегружен: библиотека остаётся отдельным инструментом.', actions: `<span class="badge lime">${LIBRARY.length} позиций</span><span class="badge ${quality.errors ? 'warn' : 'ok'}">качество: ${quality.totalIssues}</span>` })}
+  const supplierAction = includeSuppliers ? '<a class="btn ghost small" href="#/library">Быстрый каталог</a>' : '<a class="btn ghost small" href="#/library?suppliers=1">Загрузить прайс-листы</a>';
+  root.innerHTML = AppLayout(`${PageHeader({ title: 'Библиотека', description: 'Экспертная библиотека оборудования, зависимостей, альтернатив и шаблонов инсталляций. Полный каталог поставщиков загружается только по запросу.', actions: `<span class="badge lime">${library.length} позиций</span><span class="badge ${quality.errors ? 'warn' : 'ok'}">качество: ${quality.totalIssues}</span>${supplierAction}` })}
     <div class="libraryTabs"><a class="btn ${tab === 'equipment' ? 'primary' : 'ghost'} small" href="#/library?tab=equipment">Оборудование</a><a class="btn ${tab === 'templates' ? 'primary' : 'ghost'} small" href="#/library?tab=templates">Шаблоны инсталляций</a><a class="btn ${tab === 'quality' ? 'primary' : 'ghost'} small" href="#/library?tab=quality">Качество данных</a></div>
-    ${tab === 'equipment' ? equipmentTab(p, settings, state, items, deps) : ''}
+    ${tab === 'equipment' ? equipmentTab(p, settings, state, items, deps, library) : ''}
     ${tab === 'templates' ? templatesTab(state, templates) : ''}
     ${tab === 'quality' ? qualityTab(quality, deps) : ''}`);
-  bindLayoutActions(root); bind(root, p, state);
+  bindLayoutActions(root); bind(root, p, state, library);
 }
 
 function readState(q) {
@@ -45,10 +68,10 @@ function readState(q) {
   };
 }
 
-function equipmentTab(project, settings, state, items, deps) {
+function equipmentTab(project, settings, state, items, deps, library) {
   return `${LibraryFilters({ ...state, zones: project.zones || [] })}
     ${deps.length ? `<div class="notice warn"><strong>В проекте есть незакрытые зависимости: ${deps.length}</strong><p>Откройте проверку или добавьте fallback-позиции вручную. Библиотека показывает зависимости, но не добавляет их принудительно без действия пользователя.</p><div class="actions">${deps.slice(0, 4).map(dep => `<button class="btn ghost small" data-add-dependency-fallback="${dep.id}">${dep.fallbackName}</button>`).join('')}<a class="btn ghost small" href="#/check">Проверка</a></div></div>` : ''}
-    <div class="separator"></div>${items.length ? `<div class="libraryGrid">${items.map(item => EquipmentCard(item, settings, LIBRARY)).join('')}</div>` : EmptyState({ title: 'Ничего не найдено', text: 'Сбросьте фильтры или добавьте ручную позицию.', actions: '<button class="btn ghost" data-reset-library>Сбросить фильтры</button><button class="btn primary" data-add-manual-lib>Добавить ручную позицию</button>' })}`;
+    <div class="separator"></div>${items.length ? `<div class="libraryGrid">${items.map(item => EquipmentCard(item, settings, library)).join('')}</div>` : EmptyState({ title: 'Ничего не найдено', text: 'Сбросьте фильтры или добавьте ручную позицию.', actions: '<button class="btn ghost" data-reset-library>Сбросить фильтры</button><button class="btn primary" data-add-manual-lib>Добавить ручную позицию</button>' })}`;
 }
 
 function templatesTab(state, templates) {
@@ -111,10 +134,12 @@ function ensureTemplateZone(project, template) {
   return zone;
 }
 
-function bind(root, p, state) {
+function bind(root, p, state, library) {
   const updateHash = () => {
     const params = new URLSearchParams();
-    params.set('tab', new URLSearchParams(location.hash.split('?')[1] || '').get('tab') || 'equipment');
+    const current = new URLSearchParams(location.hash.split('?')[1] || '');
+    params.set('tab', current.get('tab') || 'equipment');
+    if (current.get('suppliers') === '1') params.set('suppliers', '1');
     const fields = [
       ['q', '[data-lib-search]'], ['category', '[data-lib-category]'], ['subcategory', '[data-lib-subcategory]'], ['level', '[data-lib-level]'],
       ['currency', '[data-lib-currency]'], ['price', '[data-lib-price]'], ['projectType', '[data-lib-project-type]'], ['zoneCategory', '[data-lib-zone-category]'], ['review', '[data-lib-review]']
@@ -125,8 +150,8 @@ function bind(root, p, state) {
   ['change'].forEach(eventName => root.querySelectorAll('[data-lib-search],[data-lib-category],[data-lib-subcategory],[data-lib-level],[data-lib-currency],[data-lib-price],[data-lib-project-type],[data-lib-zone-category],[data-lib-review]').forEach(el => el.addEventListener(eventName, updateHash)));
   root.querySelector('[data-reset-library]')?.addEventListener('click', () => { location.hash = '#/library'; });
   root.querySelector('[data-add-manual-lib]')?.addEventListener('click', () => { p.estimateItems.push(createEstimateItem({ name: 'Ручная позиция', category: 'Оборудование', currency: 'RUB', source: 'manual', isManual: true, note: 'добавлено из пустого состояния библиотеки' })); persistProject(); toast('Ручная позиция добавлена'); location.hash = '#/estimate?mode=detailed'; });
-  root.querySelectorAll('[data-add-library]').forEach(btn => btn.addEventListener('click', () => { const item = LIBRARY.find(i => i.id === btn.dataset.addLibrary); addCatalogItemToProject(p, item, root.querySelector('[data-target-zone]')?.value || ''); persistProject(); toast('Позиция добавлена в смету'); }));
-  root.querySelectorAll('[data-mark-review]').forEach(btn => btn.addEventListener('click', () => { const item = LIBRARY.find(i => i.id === btn.dataset.markReview); if (item) item.requiresEngineerReview = true; toast('Позиция отмечена в текущей сессии'); LibraryPage(root); }));
+  root.querySelectorAll('[data-add-library]').forEach(btn => btn.addEventListener('click', () => { const item = library.find(i => i.id === btn.dataset.addLibrary); addCatalogItemToProject(p, item, root.querySelector('[data-target-zone]')?.value || ''); persistProject(); toast('Позиция добавлена в смету'); }));
+  root.querySelectorAll('[data-mark-review]').forEach(btn => btn.addEventListener('click', () => { const item = library.find(i => i.id === btn.dataset.markReview); if (item) item.requiresEngineerReview = true; toast('Позиция отмечена в текущей сессии'); LibraryPage(root); }));
   root.querySelectorAll('[data-add-dependency-fallback]').forEach(btn => btn.addEventListener('click', () => { const dep = resolveMissingDependencies(p).find(item => item.id === btn.dataset.addDependencyFallback); if (!dep) return; p.estimateItems.push(createEstimateItem(createDependencyFallbackItem(dep, dep.zoneId))); persistProject(); toast('Fallback-зависимость добавлена в смету'); LibraryPage(root); }));
 
   root.querySelectorAll('[data-apply-template]').forEach(btn => btn.addEventListener('click', () => {
@@ -135,7 +160,7 @@ function bind(root, p, state) {
     const zone = ensureTemplateZone(p, template);
     let added = 0;
     template.items.forEach(templateItem => {
-      const candidate = LIBRARY.find(item => item.subcategoryId === templateItem.categoryId || item.categoryId === templateItem.categoryId || (item.systemGroups || []).includes(templateItem.categoryId));
+      const candidate = library.find(item => item.subcategoryId === templateItem.categoryId || item.categoryId === templateItem.categoryId || (item.systemGroups || []).includes(templateItem.categoryId));
       if (candidate) {
         addCatalogItemToProject(p, candidate, zone.id, { source: 'installation-template', qty: templateItem.qty || 1, derivedKey: `${zone.id}:${template.id}:${candidate.id}` });
       } else {
@@ -146,7 +171,7 @@ function bind(root, p, state) {
     persistProject(); toast(`Шаблон добавлен: ${added} строк`); location.hash = '#/estimate?mode=detailed';
   }));
   root.querySelectorAll('[data-replace-library]').forEach(btn => btn.addEventListener('click', () => {
-    const source = LIBRARY.find(i => i.id === btn.dataset.replaceLibrary); const replacement = LIBRARY.find(i => i.id === btn.dataset.replaceTo); if (!source || !replacement) return;
+    const source = library.find(i => i.id === btn.dataset.replaceLibrary); const replacement = library.find(i => i.id === btn.dataset.replaceTo); if (!source || !replacement) return;
     const impact = replacementImpact(source, replacement);
     const targetRows = p.estimateItems.filter(row => row.catalogItemId === source.id || row.sourceCatalogItemId === source.id || row.name === source.name);
     if (!targetRows.length) { toast('Сначала добавьте исходную позицию в смету'); return; }

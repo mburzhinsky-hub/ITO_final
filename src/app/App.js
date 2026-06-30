@@ -1,24 +1,16 @@
 import { registerRoute, startRouter } from './router.js';
-import { subscribe } from './state.js';
-import { ProjectsPage } from '../pages/ProjectsPage.js';
-import { PassportPage } from '../pages/PassportPage.js';
-import { ZonesPage } from '../pages/ZonesPage.js';
-import { EstimatePage } from '../pages/EstimatePage.js';
-import { CheckPage } from '../pages/CheckPage.js';
-import { ProposalPage } from '../pages/ProposalPage.js';
-import { LibraryPage } from '../pages/LibraryPage.js';
-import { SettingsPage } from '../pages/SettingsPage.js';
 import { mountWelcomeIntro } from '../components/WelcomeIntro.js';
 
 const root = document.getElementById('app');
-registerRoute('projects', ProjectsPage);
-registerRoute('passport', PassportPage);
-registerRoute('zones', ZonesPage);
-registerRoute('estimate', EstimatePage);
-registerRoute('check', CheckPage);
-registerRoute('proposal', ProposalPage);
-registerRoute('library', LibraryPage);
-registerRoute('settings', SettingsPage);
+
+registerRoute('projects', () => import('../pages/ProjectsPage.js').then(m => m.ProjectsPage));
+registerRoute('passport', () => import('../pages/PassportPage.js').then(m => m.PassportPage));
+registerRoute('zones', () => import('../pages/ZonesPage.js').then(m => m.ZonesPage));
+registerRoute('estimate', () => import('../pages/EstimatePage.js').then(m => m.EstimatePage));
+registerRoute('check', () => import('../pages/CheckPage.js').then(m => m.CheckPage));
+registerRoute('proposal', () => import('../pages/ProposalPage.js').then(m => m.ProposalPage));
+registerRoute('library', () => import('../pages/LibraryPage.js').then(m => m.LibraryPage));
+registerRoute('settings', () => import('../pages/SettingsPage.js').then(m => m.SettingsPage));
+
 startRouter(root);
 mountWelcomeIntro();
-subscribe(() => {});

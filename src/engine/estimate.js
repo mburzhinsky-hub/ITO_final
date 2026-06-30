@@ -1,5 +1,4 @@
 import { CATALOG } from '../data/catalog.js';
-import { SUPPLIER_PRICE_CATALOG } from '../data/supplierPriceCatalog.js';
 import { createEstimateItem } from './projectFactory.js';
 import { normalizeCurrency, normalizePriceMode, convertToRub } from './currency.js';
 import { DEFAULT_SETTINGS } from '../data/defaultSettings.js';
@@ -7,7 +6,7 @@ import { getZoneTemplate, canonicalSystemGroups } from '../data/zoneTaxonomy.js'
 import { mapLegacyCategoryToEquipment, rootCategoryName, subcategoryName } from '../data/equipmentCategories.js';
 import { dependenciesForItem, resolveMissingDependencies, createDependencyFallbackItem } from './dependencyResolver.js';
 
-const SOURCE_CATALOG = [...SUPPLIER_PRICE_CATALOG, ...CATALOG];
+const SOURCE_CATALOG = CATALOG;
 
 function catalogDedupeKey(item = {}) {
   const norm = value => String(value || '').toLowerCase().replace(/[^a-zа-я0-9]+/gi, '');
@@ -19,7 +18,7 @@ function supplierPriority(item = {}) {
   return Number(item.supplierPriority || (item.supplier ? 1 : 0));
 }
 
-function buildLibrary(items = []) {
+export function buildLibrary(items = []) {
   const byKey = new Map();
   items.map(normalizeCatalogItem).forEach(item => {
     const key = catalogDedupeKey(item);
