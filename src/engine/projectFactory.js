@@ -1,5 +1,6 @@
 import { createId } from '../utils/ids.js';
 import { DEFAULT_SETTINGS } from '../data/defaultSettings.js';
+import { normalizeCurrency, normalizePriceMode } from './currency.js';
 
 export const PROJECT_STATUSES = [
   {id:'draft', name:'Черновик'},
@@ -21,6 +22,7 @@ export function createProject(seed = {}) {
     passport: {
       projectType: 'corporate', cityTier: 'local', area: 350, floors: 1, ceilingHeight: 3.2,
       urgency: 'standard', scenario: 'base', targetBudget: 0,
+      targetBudgetIncludesVat: DEFAULT_SETTINGS.targetBudgetIncludesVat,
       vatPct: DEFAULT_SETTINGS.defaultVatPct, marginMode: DEFAULT_SETTINGS.defaultMarginMode,
       marginPct: DEFAULT_SETTINGS.defaultMarginPct,
       ...(seed.passport || {})
@@ -47,6 +49,8 @@ export function createZone(seed = {}) {
 }
 
 export function createEstimateItem(seed = {}) {
+  const currency = normalizeCurrency(seed.currency || 'RUB');
+  const priceMode = normalizePriceMode(seed.priceMode || (seed.isManual ?? true ? 'manual' : currency === 'USD' ? 'indexed' : 'fixed'));
   return {
     id: seed.id || createId('item'),
     zoneId: seed.zoneId || seed.zoneRef || '',
@@ -54,12 +58,13 @@ export function createEstimateItem(seed = {}) {
     category: seed.category || 'Оборудование',
     unit: seed.unit || 'шт.',
     qty: Number(seed.qty ?? 1),
-    currency: seed.currency || 'RUB',
+    currency,
     unitCost: Number(seed.unitCost ?? seed.priceRub ?? seed.price_rub ?? seed.price ?? 0),
-    priceMode: seed.priceMode || 'cost',
+    priceMode,
     source: seed.source || 'manual',
     isManual: seed.isManual ?? true,
     isDerived: seed.isDerived ?? false,
+    derivedKey: seed.derivedKey || '',
     note: seed.note || seed.description || ''
   };
 }
@@ -68,6 +73,8 @@ export function normalizeProject(raw) {
   const project = createProject(raw || {});
   project.zones = (raw?.zones || []).map(createZone);
   project.estimateItems = (raw?.estimateItems || raw?.estimate || []).map(createEstimateItem);
+  project.acceptedWarnings = raw?.acceptedWarnings || [];
+  project.passport.targetBudgetIncludesVat = project.passport.targetBudgetIncludesVat ?? DEFAULT_SETTINGS.targetBudgetIncludesVat;
   return project;
 }
 

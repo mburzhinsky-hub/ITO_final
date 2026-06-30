@@ -1,6 +1,6 @@
 import { AppLayout, bindLayoutActions } from '../components/AppLayout.js';
 import { ensureProject } from '../app/state.js';
-import { exportProject } from '../app/storage.js';
+import { exportProject } from '../export/exportJson.js';
 import { proposalHtml } from '../export/exportHtml.js';
 import { exportCsv } from '../export/exportExcel.js';
 import { downloadText } from '../utils/dom.js';

@@ -23,8 +23,10 @@ export function PassportPage(root) {
     <label class="field"><span>Высота, м</span><input type="number" step="0.1" data-passport-field="ceilingHeight" value="${pp.ceilingHeight}"></label>
     <label class="field"><span>Срок проекта</span><select data-passport-field="urgency">${opt(URGENCY,pp.urgency)}</select></label>
     <label class="field"><span>Целевой бюджет</span><input type="number" data-passport-field="targetBudget" value="${pp.targetBudget}"></label>
+    <label class="field"><span>Бюджет сравнивать с</span><select data-passport-field="targetBudgetIncludesVat"><option value="true" ${pp.targetBudgetIncludesVat !== false ? 'selected' : ''}>ценой с НДС</option><option value="false" ${pp.targetBudgetIncludesVat === false ? 'selected' : ''}>ценой без НДС</option></select></label>
     <label class="field"><span>НДС, %</span><input type="number" data-passport-field="vatPct" value="${pp.vatPct}"></label>
-    <label class="field"><span>Маржа / наценка, %</span><input type="number" data-passport-field="marginPct" value="${pp.marginPct}"></label>
+    <label class="field"><span>Режим коммерческой цены</span><select data-passport-field="marginMode"><option value="markup" ${pp.marginMode==='markup'?'selected':''}>Наценка на себестоимость</option><option value="margin" ${pp.marginMode==='margin'?'selected':''}>Маржа от цены продажи</option></select></label>
+    <label class="field"><span>${pp.marginMode === 'margin' ? 'Маржа, %' : 'Наценка, %'}</span><input type="number" data-passport-field="marginPct" value="${pp.marginPct}"></label>
   </div></div>`);
   bindLayoutActions(root); bind(root, p);
 }
@@ -33,6 +35,6 @@ function text(key,label,value){return `<label class="field"><span>${label}</span
 function opt(items, selected){return items.map(x=>`<option value="${x.id}" ${x.id===selected?'selected':''}>${x.name}</option>`).join('')}
 function bind(root,p){
   root.querySelectorAll('[data-root-field]').forEach(el=>el.addEventListener('input',()=>{p[el.dataset.rootField]=el.value;}));
-  root.querySelectorAll('[data-passport-field]').forEach(el=>el.addEventListener('input',()=>{const k=el.dataset.passportField; p.passport[k]=el.type==='number'?Number(el.value):el.value;}));
+  root.querySelectorAll('[data-passport-field]').forEach(el=>el.addEventListener('input',()=>{const k=el.dataset.passportField; if(k === 'targetBudgetIncludesVat') p.passport[k] = el.value === 'true'; else p.passport[k]=el.type==='number'?Number(el.value):el.value;}));
   root.querySelector('[data-save]')?.addEventListener('click',()=>{persistProject(); toast('Паспорт сохранён');});
 }

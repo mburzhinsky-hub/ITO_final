@@ -1,31 +1,80 @@
 import { DEFAULT_SETTINGS } from '../data/defaultSettings.js';
 import { num } from '../utils/format.js';
+import { itemUnitCostRub, normalizeCurrency, normalizePriceMode } from './currency.js';
+import { calculateBudgetStatus } from './budget.js';
 
-export function mergedSettings(project) { return {...DEFAULT_SETTINGS, ...(project?.settingsOverrides || {})}; }
-export function itemCostRub(item, settings = DEFAULT_SETTINGS) {
-  const unitCost = num(item.unitCost);
-  const rate = item.currency === 'USD' ? num(settings.usdRate, 80) : 1;
-  return num(item.qty, 1) * unitCost * rate;
+export function mergedSettings(project) { return {...DEFAULT_SETTINGS, ...readRuntimeSettings(), ...(project?.settingsOverrides || {})}; }
+function readRuntimeSettings() {
+  try {
+    if (typeof localStorage === 'undefined') return {};
+    return JSON.parse(localStorage.getItem('vizhu.stage1.settings') || '{}');
+  } catch { return {}; }
 }
-export function calculateTotals(project) {
-  const settings = mergedSettings(project);
-  const rates = settings.laborRates;
-  const equipment = project.estimateItems.reduce((sum, item) => sum + itemCostRub(item, settings), 0);
+export function roundMoney(value) { return Math.round(num(value)); }
+export function roundPct(value) { return Math.round(num(value) * 100) / 100; }
+
+export function itemCostRub(item, settings = DEFAULT_SETTINGS) {
+  return roundMoney(num(item.qty, 1) * itemUnitCostRub(item, settings));
+}
+
+export function calculateSalePrice(cost, pct, mode = 'markup') {
+  const value = num(pct, 0);
+  if (mode === 'margin') {
+    if (value < 0 || value >= 100) return NaN;
+    return cost / (1 - value / 100);
+  }
+  if (value < 0) return NaN;
+  return cost * (1 + value / 100);
+}
+export function calculateVat(net, vatPct = DEFAULT_SETTINGS.defaultVatPct) { return net * Math.max(0, num(vatPct, 0)) / 100; }
+export function calculateProfit(net, cost) { return net - cost; }
+export function calculateActualMargin(net, cost) { return net > 0 ? (net - cost) / net * 100 : 0; }
+export function calculateActualMarkup(net, cost) { return cost > 0 ? (net - cost) / cost * 100 : 0; }
+
+export function calculateProjectTotals(project = {}, settingsInput = null) {
+  const settings = settingsInput || mergedSettings(project);
+  const rates = settings.laborRates || DEFAULT_SETTINGS.laborRates;
+  const items = project.estimateItems || [];
+  const equipmentCost = items.reduce((sum, item) => sum + itemCostRub(item, settings), 0);
   const complexity = calculateComplexity(project);
   const logisticsCoef = calculateLogistics(project);
-  const install = equipment * rates.installationPct * complexity;
-  const pnr = equipment * rates.pnrPct * complexity;
-  const content = equipment * rates.contentPct * countFlag(project, 'content');
-  const cables = equipment * rates.cablePct * logisticsCoef;
-  const logistics = equipment * rates.logisticsPct * logisticsCoef;
-  const service = equipment * rates.servicePct * countFlag(project, 'service');
-  const cost = equipment + install + pnr + content + cables + logistics + service;
-  const marginPct = num(project.passport.marginPct, settings.defaultMarginPct) / 100;
-  const net = project.passport.marginMode === 'margin' ? cost / Math.max(0.01, 1 - marginPct) : cost * (1 + marginPct);
-  const vat = num(project.passport.vatPct, settings.defaultVatPct) / 100;
-  return { equipment, install, pnr, content, cables, logistics, service, cost, margin: net - cost, net, gross: net * (1 + vat), complexity, logisticsCoef };
+  const installCost = roundMoney(equipmentCost * num(rates.installationPct) * complexity);
+  const pnrCost = roundMoney(equipmentCost * num(rates.pnrPct) * complexity);
+  const contentCost = roundMoney(equipmentCost * num(rates.contentPct) * countFlag(project, 'content'));
+  const consumablesCost = roundMoney(equipmentCost * num(rates.cablePct) * logisticsCoef);
+  const constructionCost = roundMoney(equipmentCost * num(rates.constructionPct, 0));
+  const logisticsCost = roundMoney(equipmentCost * num(rates.logisticsPct) * logisticsCoef);
+  const serviceCost = roundMoney(equipmentCost * num(rates.servicePct) * countFlag(project, 'service'));
+  const subtotalCost = roundMoney(equipmentCost + installCost + pnrCost + contentCost + consumablesCost + constructionCost + logisticsCost + serviceCost);
+  const marginMode = project.passport?.marginMode || settings.defaultMarginMode || 'markup';
+  const marginPct = num(project.passport?.marginPct, settings.defaultMarginPct);
+  const rawNet = calculateSalePrice(subtotalCost, marginPct, marginMode);
+  const salePriceNet = Number.isFinite(rawNet) ? roundMoney(rawNet) : 0;
+  const vatPct = num(project.passport?.vatPct, settings.defaultVatPct);
+  const vatAmount = roundMoney(calculateVat(salePriceNet, vatPct));
+  const salePriceGross = roundMoney(salePriceNet + vatAmount);
+  const profit = roundMoney(calculateProfit(salePriceNet, subtotalCost));
+  const actualMarginPct = roundPct(calculateActualMargin(salePriceNet, subtotalCost));
+  const actualMarkupPct = roundPct(calculateActualMarkup(salePriceNet, subtotalCost));
+  const totals = {
+    equipmentCost, installCost, pnrCost, contentCost, consumablesCost, constructionCost, logisticsCost, serviceCost,
+    subtotalCost, salePriceNet, vatAmount, salePriceGross, profit, actualMarginPct, actualMarkupPct,
+    complexity, logisticsCoef, marginMode, marginPct, vatPct,
+    equipment: equipmentCost, install: installCost, pnr: pnrCost, content: contentCost, cables: consumablesCost,
+    logistics: logisticsCost, service: serviceCost, cost: subtotalCost, margin: profit, net: salePriceNet, gross: salePriceGross
+  };
+  const budget = calculateBudgetStatus(project, totals, settings);
+  totals.targetBudget = budget.targetBudget;
+  totals.targetBudgetIncludesVat = budget.includesVat;
+  totals.targetBudgetDelta = roundMoney(budget.delta);
+  totals.targetBudgetDeltaPct = roundPct(budget.deltaPct);
+  totals.targetBudgetStatus = budget.status;
+  return totals;
 }
-function countFlag(project, flag) { return project.zones.some(z => z.flags?.[flag]) ? 1 : 0; }
+
+export const calculateTotals = calculateProjectTotals;
+
+function countFlag(project, flag) { return (project.zones || []).some(z => z.flags?.[flag]) ? 1 : 0; }
 export function calculateComplexity(project) {
   const p = project.passport || {}; const zones = project.zones || [];
   let coef = 1 + Math.max(0, num(p.ceilingHeight,3)-3) * 0.03 + Math.max(0, zones.length-1) * 0.03;
@@ -38,4 +87,17 @@ export function calculateLogistics(project) {
   const tier = project.passport?.cityTier || 'local';
   const map = {local:1, regional:1.08, remote:1.18, hard:1.3, moscow:1, spb:1.03, region:1.12, far:1.25};
   return map[tier] || 1;
+}
+
+export function normalizeCommercialFields(project = {}, settings = DEFAULT_SETTINGS) {
+  project.passport ||= {};
+  project.passport.marginMode = ['markup','margin'].includes(project.passport.marginMode) ? project.passport.marginMode : settings.defaultMarginMode;
+  project.passport.marginPct = num(project.passport.marginPct, settings.defaultMarginPct);
+  project.passport.vatPct = num(project.passport.vatPct, settings.defaultVatPct);
+  project.passport.targetBudgetIncludesVat = project.passport.targetBudgetIncludesVat ?? settings.targetBudgetIncludesVat;
+  (project.estimateItems || []).forEach(item => {
+    item.currency = normalizeCurrency(item.currency);
+    item.priceMode = normalizePriceMode(item.priceMode || (item.isManual ? 'manual' : item.currency === 'USD' ? 'indexed' : 'fixed'));
+  });
+  return project;
 }

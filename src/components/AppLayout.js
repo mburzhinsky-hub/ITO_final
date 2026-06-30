@@ -1,7 +1,7 @@
 import { currentRoute, navigate } from '../app/router.js';
 import { getProject, persistProject, setProject } from '../app/state.js';
 import { createAndSaveProject } from '../app/storage.js';
-import { exportProject } from '../app/storage.js';
+import { exportProject } from '../export/exportJson.js';
 import { downloadText, toast } from '../utils/dom.js';
 import { TopSummary } from './TopSummary.js';
 
