@@ -5,6 +5,7 @@ import { ensureProject, persistProject, getSettings } from '../app/state.js';
 import { LIBRARY, addCatalogItemToProject } from '../engine/estimate.js';
 import { createEstimateItem, createZone } from '../engine/projectFactory.js';
 import { toast } from '../utils/dom.js';
+import { escapeAttr, escapeHtml } from '../utils/format.js';
 import { LibraryFilters } from '../components/LibraryFilters.js';
 import { EquipmentCard } from '../components/EquipmentCard.js';
 import { InstallationTemplateList } from '../components/InstallationTemplateList.js';
@@ -48,7 +49,7 @@ export function LibraryPage(root) {
 
   if (requestedSupplierId && supplierMeta && !supplierStatus.loadedSupplierIds.includes(requestedSupplierId)) {
     const supplier = supplierMeta.suppliers.find(item => item.id === requestedSupplierId);
-    root.innerHTML = loadingLayout(`Загружаем поставщика ${supplier?.name || requestedSupplierId}`, 'Остальные supplier-файлы не загружаются автоматически.');
+    root.innerHTML = loadingLayout(`Загружаем поставщика ${escapeHtml(supplier?.name || requestedSupplierId)}`, 'Остальные supplier-файлы не загружаются автоматически.');
     bindLayoutActions(root);
     loadSupplierById(requestedSupplierId).then(() => LibraryPage(root)).catch(error => { console.error(error); toast('Не удалось загрузить выбранного поставщика'); location.hash = '#/library'; });
     return;
@@ -75,7 +76,7 @@ export function LibraryPage(root) {
 }
 
 function loadingLayout(title, text) {
-  return AppLayout(`${PageHeader({ title: 'Библиотека', description: 'Supplier-каталог вынесен из стартовой загрузки.', actions: '<a class="btn ghost" href="#/library">Вернуться в быстрый каталог</a>' })}<section class="card"><h3>${title}</h3><p class="muted">${text}</p></section>`);
+  return AppLayout(`${PageHeader({ title: 'Библиотека', description: 'Supplier-каталог вынесен из стартовой загрузки.', actions: '<a class="btn ghost" href="#/library">Вернуться в быстрый каталог</a>' })}<section class="card"><h3>${escapeHtml(title)}</h3><p class="muted">${escapeHtml(text)}</p></section>`);
 }
 
 function readState(q) {
@@ -106,11 +107,11 @@ function equipmentTab(project, settings, state, items, deps, library, total) {
 function supplierPanel(meta, status, state) {
   if (!meta) return `<section class="card"><div class="sectionTitle"><div><h3>Прайсы поставщиков</h3><p class="muted">Быстрый каталог уже доступен. Метаданные поставщиков загружаются отдельно маленьким JSON-файлом.</p></div><span class="badge">metadata</span></div></section>`;
   const visibleSuppliers = meta.suppliers.slice(0, 20);
-  const scopeStats = Object.entries(meta.scopes || {}).map(([scope, count]) => `<span class="badge">${catalogScopeLabel(scope)}: ${count.toLocaleString('ru-RU')}</span>`).join('');
+  const scopeStats = Object.entries(meta.scopes || {}).map(([scope, count]) => `<span class="badge">${escapeHtml(catalogScopeLabel(scope))}: ${count.toLocaleString('ru-RU')}</span>`).join('');
   return `<section class="card supplierCatalogPanel">
-    <div class="sectionTitle"><div><h3>Прайсы поставщиков</h3><p class="muted">${meta.supplierCount} поставщиков, ${meta.totalItems.toLocaleString('ru-RU')} позиций. Загружено в память: ${status.loadedItemCount.toLocaleString('ru-RU')}.</p></div><div class="actions"><button class="btn ghost small" data-load-all-suppliers>Загрузить всех поставщиков</button><a class="btn ghost small" href="#/library">Только быстрый каталог</a></div></div>
+    <div class="sectionTitle"><div><h3>Прайсы поставщиков</h3><p class="muted">${escapeHtml(meta.supplierCount)} поставщиков, ${escapeHtml(meta.totalItems.toLocaleString('ru-RU'))} позиций. Загружено в память: ${escapeHtml(status.loadedItemCount.toLocaleString('ru-RU'))}.</p></div><div class="actions"><button class="btn ghost small" data-load-all-suppliers>Загрузить всех поставщиков</button><a class="btn ghost small" href="#/library">Только быстрый каталог</a></div></div>
     <div class="tagRow">${scopeStats}</div>
-    <div class="miniList">${visibleSuppliers.map(supplier => `<a class="miniListItem" href="#/library?supplier=${supplier.id}&scope=${state.scope || 'default'}"><span class="badge ${status.loadedSupplierIds.includes(supplier.id) ? 'ok' : ''}">${status.loadedSupplierIds.includes(supplier.id) ? 'загружен' : 'по клику'}</span><strong>${supplier.name}</strong><small>${supplier.itemCount.toLocaleString('ru-RU')} позиций · ${(supplier.fileSize / 1024 / 1024).toFixed(1)} MB</small></a>`).join('')}</div>
+    <div class="miniList">${visibleSuppliers.map(supplier => `<a class="miniListItem" href="#/library?supplier=${escapeAttr(supplier.id)}&scope=${escapeAttr(state.scope || 'default')}"><span class="badge ${status.loadedSupplierIds.includes(supplier.id) ? 'ok' : ''}">${status.loadedSupplierIds.includes(supplier.id) ? 'загружен' : 'по клику'}</span><strong>${escapeHtml(supplier.name)}</strong><small>${escapeHtml(supplier.itemCount.toLocaleString('ru-RU'))} позиций · ${(supplier.fileSize / 1024 / 1024).toFixed(1)} MB</small></a>`).join('')}</div>
   </section>`;
 }
 
@@ -120,7 +121,7 @@ function templatesTab(state, templates) {
 
 function qualityTab(quality, deps) {
   return `<div class="grid cols3"><div class="card"><div class="muted">Всего позиций</div><div class="valueBig">${quality.totalItems}</div></div><div class="card"><div class="muted">Ошибки</div><div class="valueBig">${quality.errors}</div></div><div class="card"><div class="muted">Предупреждения</div><div class="valueBig">${quality.warnings}</div></div></div>
-  <div class="separator"></div><div class="grid cols2"><section class="card"><h3>Проверка каталога</h3><div class="miniList">${quality.sample.length ? quality.sample.map(issue => `<div class="miniListItem"><span class="badge ${issue.severity === 'error' ? 'danger' : 'warn'}">${issue.issueType}</span><strong>${issue.itemId}</strong><small>${issue.message} ${issue.suggestedAction}</small></div>`).join('') : '<div class="muted">Критичных проблем в нормализованной библиотеке не найдено.</div>'}</div></section><section class="card"><h3>Зависимости проекта</h3><div class="miniList">${deps.length ? deps.map(dep => `<div class="miniListItem"><span class="badge ${dep.required ? 'warn' : ''}">${dep.dependencyType}</span><strong>${dep.sourceItemName} → ${dep.fallbackName}</strong><small>${dep.reason}</small></div>`).join('') : '<div class="muted">Незакрытых зависимостей в текущей смете нет.</div>'}</div></section></div>`;
+  <div class="separator"></div><div class="grid cols2"><section class="card"><h3>Проверка каталога</h3><div class="miniList">${quality.sample.length ? quality.sample.map(issue => `<div class="miniListItem"><span class="badge ${issue.severity === 'error' ? 'danger' : 'warn'}">${escapeHtml(issue.issueType)}</span><strong>${escapeHtml(issue.itemId)}</strong><small>${escapeHtml(`${issue.message} ${issue.suggestedAction}`)}</small></div>`).join('') : '<div class="muted">Критичных проблем в нормализованной библиотеке не найдено.</div>'}</div></section><section class="card"><h3>Зависимости проекта</h3><div class="miniList">${deps.length ? deps.map(dep => `<div class="miniListItem"><span class="badge ${dep.required ? 'warn' : ''}">${escapeHtml(dep.dependencyType)}</span><strong>${escapeHtml(`${dep.sourceItemName} → ${dep.fallbackName}`)}</strong><small>${escapeHtml(dep.reason)}</small></div>`).join('') : '<div class="muted">Незакрытых зависимостей в текущей смете нет.</div>'}</div></section></div>`;
 }
 
 function filterLibrary(library, state) {

@@ -1,3 +1,4 @@
+import { escapeHtml } from '../utils/format.js';
 const routes = new Map();
 const resolvedRoutes = new Map();
 let renderVersion = 0;
@@ -12,8 +13,8 @@ export function currentRoute() {
 }
 
 export function navigate(route) {
-  if (globalThis.location) globalThis.location.hash = `#/${route}`;
-  else if (globalThis.window?.location) globalThis.window.location.hash = `#/${route}`;
+  if (globalThis.location) globalThis.location.hash = `#/${escapeHtml(route)}`;
+  else if (globalThis.window?.location) globalThis.window.location.hash = `#/${escapeHtml(route)}`;
 }
 
 async function resolveRenderer(route) {
@@ -32,7 +33,7 @@ function setActiveRoute(route) {
 }
 
 function renderLoading(root, route) {
-  root.innerHTML = `<main class="appShell loadingShell"><section class="card"><div class="sectionTitle"><div><h2>Открываем страницу</h2><p class="muted">Загружается модуль ${route}.</p></div><span class="badge">быстрый режим</span></div></section></main>`;
+  root.innerHTML = `<main class="appShell loadingShell"><section class="card"><div class="sectionTitle"><div><h2>Открываем страницу</h2><p class="muted">Загружается модуль ${escapeHtml(route)}.</p></div><span class="badge">быстрый режим</span></div></section></main>`;
 }
 
 export function startRouter(root) {
@@ -50,7 +51,7 @@ export function startRouter(root) {
       clearTimeout(loadingTimer);
       console.error('Route render failed', error);
       if (version !== renderVersion) return;
-      root.innerHTML = `<main class="appShell"><section class="card"><h2>Страница не открылась</h2><p class="muted">Попробуйте обновить приложение. Ошибка не должна приводить к белому экрану.</p><pre>${String(error?.message || error)}</pre><a class="btn primary" href="#/projects">К проектам</a></section></main>`;
+      root.innerHTML = `<main class="appShell"><section class="card"><h2>Страница не открылась</h2><p class="muted">Попробуйте обновить приложение. Ошибка не должна приводить к белому экрану.</p><pre>${escapeHtml(String(error?.message || error))}</pre><a class="btn primary" href="#/projects">К проектам</a></section></main>`;
     }
   };
   window.addEventListener('hashchange', render);

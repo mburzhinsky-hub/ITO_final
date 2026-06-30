@@ -14,7 +14,7 @@ import { downloadProposalHtml } from '../export/exportHtml.js';
 import { downloadProjectWorkbook } from '../export/exportExcel.js';
 import { printProposal } from '../export/exportPrint.js';
 import { toast } from '../utils/dom.js';
-import { formatMoney } from '../utils/format.js';
+import { escapeHtml, formatMoney } from '../utils/format.js';
 
 export function ProposalPage(root) {
   const project = ensureProject();
@@ -74,7 +74,7 @@ function renderGuard(warnings, isEmpty) {
   const errors = warnings.filter(w => w.severity === 'error');
   const soft = warnings.filter(w => w.severity !== 'error');
   if (isEmpty) return '<div class="notice warn"><strong>Смета пустая</strong><p>Клиентское КП можно оформить только после заполнения состава решения.</p></div>';
-  if (errors.length) return `<div class="notice warn"><strong>Есть критичные ошибки проверки</strong><p>${errors.map(w => w.title).join(', ')}. Перед отправкой клиенту лучше открыть этап проверки.</p><a class="btn ghost small" href="#/check">Открыть проверку</a></div>`;
+  if (errors.length) return `<div class="notice warn"><strong>Есть критичные ошибки проверки</strong><p>${errors.map(w => escapeHtml(w.title)).join(', ')}. Перед отправкой клиенту лучше открыть этап проверки.</p><a class="btn ghost small" href="#/check">Открыть проверку</a></div>`;
   if (soft.length) return `<div class="notice ok"><strong>КП можно готовить</strong><p>Есть ${soft.length} некритичных замечаний. Внутренние поля не попадут в клиентский документ.</p></div>`;
   return '<div class="notice ok"><strong>КП готово к предпросмотру</strong><p>Клиентское представление отделено от внутренней инженерно-коммерческой сметы.</p></div>';
 }

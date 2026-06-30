@@ -10,7 +10,7 @@ import { CITY_TIERS } from '../data/cityTiers.js';
 import { URGENCY } from '../data/urgency.js';
 import { validateProject } from '../engine/validation.js';
 import { calculateProjectTotals } from '../engine/pricing.js';
-import { escapeHtml, formatMoney } from '../utils/format.js';
+import { escapeAttr, escapeHtml, formatMoney } from '../utils/format.js';
 import { toast } from '../utils/dom.js';
 
 export function PassportPage(root) {
@@ -47,15 +47,15 @@ export function PassportPage(root) {
     </section>
     <aside class="card projectSideSummary">
       <h3>Сводка</h3>
-      <div class="summaryList"><div><span>Статус</span><strong>${statusLabel(p.status)}</strong></div><div><span>Зоны</span><strong>${p.zones.length}</strong></div><div><span>Ориентировочная стоимость</span><strong>${formatMoney(totals.salePriceGross)}</strong></div><div><span>Предупреждения</span><strong>${warnings.length}</strong></div></div>
+      <div class="summaryList"><div><span>Статус</span><strong>${escapeHtml(statusLabel(p.status))}</strong></div><div><span>Зоны</span><strong>${p.zones.length}</strong></div><div><span>Ориентировочная стоимость</span><strong>${formatMoney(totals.salePriceGross)}</strong></div><div><span>Предупреждения</span><strong>${warnings.length}</strong></div></div>
       <div data-passport-missing>${missingNotice(missing)}</div>
       ${PrimaryActionBar('<button class="btn primary" data-next>Перейти к зонам</button>')}
     </aside>
   </div>`);
   bindLayoutActions(root); bind(root, p, missing);
 }
-function field(key,label,value){return `<label class="field"><span>${escapeHtml(label)}</span><input data-root-field="${escapeHtml(key)}" value="${escapeHtml(value || '')}"></label>`}
-function opt(items, selected){return items.map(x=>`<option value="${escapeHtml(x.id)}" ${x.id===selected?'selected':''}>${escapeHtml(x.name)}</option>`).join('')}
+function field(key,label,value){return `<label class="field"><span>${escapeHtml(label)}</span><input data-root-field="${escapeAttr(key)}" value="${escapeAttr(value || '')}"></label>`}
+function opt(items, selected){return items.map(x=>`<option value="${escapeAttr(x.id)}" ${x.id===selected?'selected':''}>${escapeHtml(x.name)}</option>`).join('')}
 function statusLabel(status){return ({draft:'Черновик',estimate_ready:'Смета готова',has_errors:'Есть ошибки',proposal_ready:'КП готово'}[status] || 'Черновик')}
 function requiredMissing(p){const list=[]; const customer = String(p.customerName || p.customer || p.passport?.customerName || p.passport?.customer || ''); if(!String(p.name || '').trim()) list.push('название проекта'); if(!customer.trim()) list.push('заказчик'); if(!p.passport?.area) list.push('площадь'); return list;}
 function missingNotice(missing){return missing.length ? `<div class="notice warn"><strong>Не хватает данных</strong><p>${missing.map(escapeHtml).join(', ')}</p></div>` : '<div class="notice ok"><strong>Паспорт заполнен</strong><p>Можно переходить к зонам.</p></div>'}

@@ -16,7 +16,7 @@ export function bindImportProjectInput(root) {
       }
       const project = importProject(data.project, mode);
       setProject(project);
-      toast('Проект импортирован');
+      toast(data.sanitized ? 'Проект импортирован, потенциально опасная разметка была очищена' : 'Проект импортирован');
       navigate('passport');
     } catch (error) {
       alert(error?.message || 'Не удалось импортировать проект');

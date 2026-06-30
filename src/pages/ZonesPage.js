@@ -7,6 +7,7 @@ import { createZone } from '../engine/projectFactory.js';
 import { generateEstimateFromZones } from '../engine/estimate.js';
 import { toast } from '../utils/dom.js';
 import { PROJECT_TYPES } from '../data/projectTypes.js';
+import { escapeAttr, escapeHtml } from '../utils/format.js';
 import { ZONE_CATEGORIES, getCategoriesForProject, getProjectZoneModel, getTemplatesForProject, getZoneCategory, createZoneSeedFromTemplate } from '../data/zoneTaxonomy.js';
 
 export function ZonesPage(root) {
@@ -23,10 +24,10 @@ export function ZonesPage(root) {
   const groupedTemplates = groupByCategory(templates);
   const typeLabel = projectType?.name || 'тип проекта';
 
-  root.innerHTML = AppLayout(`${PageHeader({ title: 'Зоны', description: `Тип проекта: ${typeLabel}. Выберите типовые зоны или найдите нужный шаблон. Детали оборудования скрыты, чтобы не перегружать экран.`, actions: '<button class="btn primary" data-add-typical>Добавить типовые зоны</button><button class="btn ghost" data-add-zone>Вручную</button><button class="btn ghost" data-generate-estimate>Смета</button>' })}
+  root.innerHTML = AppLayout(`${PageHeader({ title: 'Зоны', description: `Тип проекта: ${escapeHtml(typeLabel)}. Выберите типовые зоны или найдите нужный шаблон. Детали оборудования скрыты, чтобы не перегружать экран.`, actions: '<button class="btn primary" data-add-typical>Добавить типовые зоны</button><button class="btn ghost" data-add-zone>Вручную</button><button class="btn ghost" data-generate-estimate>Смета</button>' })}
   <section class="card zoneModelPanel">
-    <div class="sectionTitle"><div><h3>Релевантные категории</h3><p class="muted">${model.typicalScenario}</p></div><span class="badge ${model.requiresEngineerReview ? 'warn' : 'ok'}">${model.requiresEngineerReview ? 'нужна проверка' : 'типовой сценарий'}</span></div>
-    <div class="categoryPills">${categories.map(c => `<button class="categoryPill ${categoryFilter === c.id ? 'active' : ''} ${c.isRecommended ? '' : 'mutedPill'}" data-category-filter="${c.id}"><span>${c.icon}</span><strong>${c.name}</strong><small>${c.isRecommended ? 'релевантна' : 'нетиповая'}</small></button>`).join('')}</div>
+    <div class="sectionTitle"><div><h3>Релевантные категории</h3><p class="muted">${escapeHtml(model.typicalScenario)}</p></div><span class="badge ${model.requiresEngineerReview ? 'warn' : 'ok'}">${model.requiresEngineerReview ? 'нужна проверка' : 'типовой сценарий'}</span></div>
+    <div class="categoryPills">${categories.map(c => `<button class="categoryPill ${categoryFilter === c.id ? 'active' : ''} ${c.isRecommended ? '' : 'mutedPill'}" data-category-filter="${escapeAttr(c.id)}"><span>${escapeHtml(c.icon)}</span><strong>${escapeHtml(c.name)}</strong><small>${c.isRecommended ? 'релевантна' : 'нетиповая'}</small></button>`).join('')}</div>
     <div class="actions"><button class="btn ${categoryFilter === 'all' ? 'primary' : 'ghost'} small" data-category-filter="all">Все релевантные</button><button class="btn ${showAll ? 'warn' : 'ghost'} small" data-toggle-all>${showAll ? 'Скрыть нетиповые категории' : 'Показать все категории'}</button></div>
   </section>
 
@@ -34,7 +35,7 @@ export function ZonesPage(root) {
 
   <div class="separator"></div>
   <section class="card templatePanel"><div class="sectionTitle"><div><h3>Библиотека шаблонов</h3><p class="muted">Карточки компактные: состав оборудования раскрывается по клику.</p></div><span class="badge">${templates.length} шаблонов</span></div>
-    <div class="grid cols3"><label class="field"><span>Поиск</span><input data-template-search value="${search}" placeholder="переговорная, LED, музей, операторская"></label><label class="field"><span>Категория</span><select data-template-category><option value="all" ${categoryFilter==='all'?'selected':''}>Все категории в выдаче</option>${ZONE_CATEGORIES.map(c=>`<option value="${c.id}" ${categoryFilter===c.id?'selected':''}>${c.name}</option>`).join('')}</select></label><div class="field"><span>&nbsp;</span><button class="btn ghost" data-reset-template-filter>Сбросить</button></div></div>
+    <div class="grid cols3"><label class="field"><span>Поиск</span><input data-template-search value="${escapeAttr(search)}" placeholder="переговорная, LED, музей, операторская"></label><label class="field"><span>Категория</span><select data-template-category><option value="all" ${categoryFilter==='all'?'selected':''}>Все категории в выдаче</option>${ZONE_CATEGORIES.map(c=>`<option value="${escapeAttr(c.id)}" ${categoryFilter===c.id?'selected':''}>${escapeHtml(c.name)}</option>`).join('')}</select></label><div class="field"><span>&nbsp;</span><button class="btn ghost" data-reset-template-filter>Сбросить</button></div></div>
     ${templates.length ? Object.entries(groupedTemplates).map(([categoryId, items]) => templateGroup(categoryId, items, model)).join('') : EmptyState({ title: 'Ничего не найдено', text: 'Сбросьте фильтры, включите все категории или добавьте зону вручную.', actions: '<button class="btn ghost" data-reset-template-filter>Сбросить фильтры</button><button class="btn primary" data-add-zone>Добавить зону</button>' })}
   </section>`);
   bindLayoutActions(root); bind(root,p,{search,categoryFilter,showAll,projectTypeId});
@@ -47,7 +48,7 @@ function groupByCategory(templates) {
 function templateGroup(categoryId, items, model) {
   const category = getZoneCategory(categoryId);
   const isRecommended = model.allowedZoneCategoryIds.includes(categoryId);
-  return `<div class="templateCategoryGroup"><div class="groupHeader"><div><h3>${category?.icon || '•'} ${category?.name || 'Категория'}</h3><p class="muted">${category?.description || ''}</p></div><span class="badge ${isRecommended ? 'ok' : 'warn'}">${isRecommended ? 'для типа проекта' : 'нетиповая'}</span></div>
+  return `<div class="templateCategoryGroup"><div class="groupHeader"><div><h3>${escapeHtml(`${category?.icon || '•'} ${category?.name || 'Категория'}`)}</h3><p class="muted">${escapeHtml(category?.description || '')}</p></div><span class="badge ${isRecommended ? 'ok' : 'warn'}">${isRecommended ? 'для типа проекта' : 'нетиповая'}</span></div>
   <div class="libraryGrid compactTemplates">${items.map(t=>templateCard(t, model)).join('')}</div></div>`;
 }
 
@@ -58,9 +59,9 @@ function templateCard(t, model) {
   const why = isDefault ? 'Входит в типовой набор проекта.' : isRecommended ? `Релевантная категория: ${category?.name || 'категория зоны'}.` : 'Эта зона не типовая для выбранного типа проекта, но её можно добавить вручную.';
   const itemCount = t.recommendedItems?.length || t.requiredSystemGroups.length;
   return `<article class="card itemCard templateCardLite ${isRecommended ? '' : 'nonTypicalTemplate'}">
-    <div class="templateLiteHead"><div><div class="itemTitle">${t.name}</div><div class="muted smallText">${t.description}</div></div><button class="btn ${isRecommended ? 'ghost' : 'warn'} small" data-template-zone="${t.id}">Добавить</button></div>
-    <div class="zoneMeta"><span class="badge lime">${category?.name || ''}</span>${isDefault ? '<span class="badge ok">типовая</span>' : ''}${t.requiresEngineerReview ? '<span class="badge warn">инж. проверка</span>' : ''}<span class="badge">${itemCount} групп</span></div>
-    <details class="compactDetails"><summary>Оборудование и причина рекомендации</summary><p class="muted smallText">${why}</p><div class="zoneMeta">${(t.recommendedItems || []).slice(0,8).map(i=>`<span class="badge">${i.name}</span>`).join('')}${itemCount > 8 ? `<span class="badge">+${itemCount - 8}</span>` : ''}</div></details>
+    <div class="templateLiteHead"><div><div class="itemTitle">${escapeHtml(t.name)}</div><div class="muted smallText">${escapeHtml(t.description)}</div></div><button class="btn ${isRecommended ? 'ghost' : 'warn'} small" data-template-zone="${escapeAttr(t.id)}">Добавить</button></div>
+    <div class="zoneMeta"><span class="badge lime">${escapeHtml(category?.name || '')}</span>${isDefault ? '<span class="badge ok">типовая</span>' : ''}${t.requiresEngineerReview ? '<span class="badge warn">инж. проверка</span>' : ''}<span class="badge">${itemCount} групп</span></div>
+    <details class="compactDetails"><summary>Оборудование и причина рекомендации</summary><p class="muted smallText">${escapeHtml(why)}</p><div class="zoneMeta">${(t.recommendedItems || []).slice(0,8).map(i=>`<span class="badge">${escapeHtml(i.name)}</span>`).join('')}${itemCount > 8 ? `<span class="badge">+${itemCount - 8}</span>` : ''}</div></details>
   </article>`;
 }
 

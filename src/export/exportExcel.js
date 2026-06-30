@@ -3,6 +3,7 @@ import { mergedSettings } from '../engine/pricing.js';
 import { validateProject } from '../engine/validation.js';
 import { downloadText } from '../utils/dom.js';
 import { safeFileName, dateStamp } from './exportHtml.js';
+import { escapeSpreadsheetCell } from '../utils/sanitize.js';
 
 export function exportProjectWorkbook(project, settingsInput = null, proposalOptions = null) {
   const settings = settingsInput || mergedSettings(project);
@@ -99,7 +100,7 @@ export function exportCsv(project) {
   const internal = buildInternalEstimateView(project);
   const header = ['Зона','Позиция','Категория','Ед.','Кол-во','Закупка','Сумма закупки','Цена продажи','Сумма продажи','Валюта','Источник'];
   const rows = internal.rows.map(i => [i.zoneName, i.name, i.category, i.unit, i.qty, i.unitCost, i.totalCost, i.unitSalePrice, i.totalSale, i.currency, i.priceSource]);
-  return [header, ...rows].map(row => row.map(cell => `"${String(cell ?? '').replaceAll('"','""')}"`).join(';')).join('\n');
+  return [header, ...rows].map(row => row.map(cell => `"${String(escapeSpreadsheetCell(cell ?? '')).replaceAll('"','""')}"`).join(';')).join('\n');
 }
 
 function sheet(name, rows) { return { name, rows }; }
@@ -115,8 +116,9 @@ function renderWorksheet(s) {
 }
 
 function renderCell(value, isHeader) {
-  const type = typeof value === 'number' ? 'Number' : 'String';
-  const style = isHeader ? ' ss:StyleID="Header"' : typeof value === 'number' ? ' ss:StyleID="Money"' : ' ss:StyleID="Text"';
-  return `<Cell${style}><Data ss:Type="${type}">${xml(value ?? '')}</Data></Cell>`;
+  const safeValue = typeof value === 'number' ? value : escapeSpreadsheetCell(value ?? '');
+  const type = typeof safeValue === 'number' ? 'Number' : 'String';
+  const style = isHeader ? ' ss:StyleID="Header"' : typeof safeValue === 'number' ? ' ss:StyleID="Money"' : ' ss:StyleID="Text"';
+  return `<Cell${style}><Data ss:Type="${type}">${xml(safeValue ?? '')}</Data></Cell>`;
 }
 function xml(value) { return String(value).replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch])); }

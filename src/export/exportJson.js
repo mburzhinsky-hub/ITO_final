@@ -6,9 +6,10 @@ import { calculateProjectTotals } from '../engine/pricing.js';
 import { validateProject } from '../engine/validation.js';
 import { downloadText } from '../utils/dom.js';
 import { safeFileName, dateStamp } from './exportHtml.js';
+import { hasSuspiciousMarkup, sanitizeImportedProject } from '../utils/sanitize.js';
 
-export const CURRENT_PROJECT_SCHEMA_VERSION = 7;
-export const APP_VERSION = 'stage7-refactor-stabilization';
+export const CURRENT_PROJECT_SCHEMA_VERSION = 9;
+export const APP_VERSION = 'stage9-security-hotfix';
 
 export function exportProjectJson(project) {
   const cleanProject = stripRuntimeProject(project);
@@ -37,11 +38,13 @@ export async function parseProjectJson(fileOrText) {
   const text = typeof fileOrText === 'string' ? fileOrText : await fileOrText.text();
   let raw;
   try { raw = JSON.parse(text); } catch { throw new Error('Файл не является корректным JSON.'); }
+  const suspicious = hasSuspiciousMarkup(text);
   const migrated = migrateProjectSchema(raw);
-  const project = validateImportedProject(migrated);
+  const sanitized = sanitizeImportedProject(migrated);
+  const project = validateImportedProject(sanitized);
   let conflict = false;
   try { conflict = Boolean(typeof localStorage !== 'undefined' && project.id && readProject(project.id)); } catch { conflict = false; }
-  return { project, conflict };
+  return { project, conflict, sanitized: suspicious };
 }
 
 export function validateImportedProject(data) {
@@ -50,7 +53,10 @@ export function validateImportedProject(data) {
   if (!candidate.id || !candidate.name) throw new Error('В проекте отсутствуют ключевые поля id/name.');
   if (!Array.isArray(candidate.zones)) throw new Error('Поле zones должно быть массивом.');
   if (!Array.isArray(candidate.estimateItems) && !Array.isArray(candidate.estimate)) throw new Error('Поле estimateItems должно быть массивом.');
-  return normalizeProject({...candidate, schemaVersion: candidate.schemaVersion || CURRENT_PROJECT_SCHEMA_VERSION});
+  const normalized = normalizeProject({...candidate, schemaVersion: candidate.schemaVersion || CURRENT_PROJECT_SCHEMA_VERSION});
+  normalized.schemaVersion = CURRENT_PROJECT_SCHEMA_VERSION;
+  normalized.appVersion = APP_VERSION;
+  return normalized;
 }
 
 export function migrateProjectSchema(data) {

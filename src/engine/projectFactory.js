@@ -34,8 +34,8 @@ export function createProject(seed = {}) {
     proposalOptions: normalizeProposalOptions(seed.proposalOptions || {}),
     settingsOverrides: seed.settingsOverrides || {},
     notes: seed.notes || '',
-    schemaVersion: Math.max(Number(seed.schemaVersion || 0), 7) || 7,
-    appVersion: seed.appVersion || 'stage7-refactor-stabilization',
+    schemaVersion: Math.max(Number(seed.schemaVersion || 0), 9) || 9,
+    appVersion: seed.appVersion || 'stage9-security-hotfix',
     proposalNumber: seed.proposalNumber || '',
     managerContact: seed.managerContact || '',
     customerContact: seed.customerContact || ''
@@ -109,8 +109,8 @@ export function normalizeProject(raw) {
   project.acceptedWarnings = raw?.acceptedWarnings || [];
   project.proposalOptions = normalizeProposalOptions(raw?.proposalOptions || project.proposalOptions || {});
   project.passport.targetBudgetIncludesVat = project.passport.targetBudgetIncludesVat ?? DEFAULT_SETTINGS.targetBudgetIncludesVat;
-  project.schemaVersion = Math.max(Number(project.schemaVersion || 0), 7) || 7;
-  project.appVersion = project.appVersion || 'stage7-refactor-stabilization';
+  project.schemaVersion = Math.max(Number(project.schemaVersion || 0), 9) || 9;
+  project.appVersion = project.appVersion || 'stage9-security-hotfix';
   return project;
 }
 

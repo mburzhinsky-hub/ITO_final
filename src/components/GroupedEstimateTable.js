@@ -1,5 +1,5 @@
 import { itemCostRub, mergedSettings } from '../engine/pricing.js';
-import { formatMoney } from '../utils/format.js';
+import { escapeAttr, escapeHtml, formatMoney } from '../utils/format.js';
 import { EmptyState } from './EmptyState.js';
 
 const preferredGroups = ['Оборудование', 'LCD-панели', 'LED-экраны', 'Проекторы', 'Интерактивные панели', 'Акустика', 'Микрофоны', 'DSP и усилители', 'ВКС-системы', 'Коммутация', 'Системы управления', 'Кабельная инфраструктура', 'Крепления и конструкции', 'Монтаж', 'ПНР', 'Контент / ПО', 'Логистика', 'Сервис'];
@@ -14,7 +14,7 @@ export function GroupedEstimateTable(project, mode = 'compact') {
   const zoneName = id => project.zones.find(z => z.id === id)?.name || '—';
   const groups = groupItems(project.estimateItems);
   return `<div class="estimateModeNote"><span class="badge ${mode === 'detailed' ? 'lime' : ''}">${mode === 'detailed' ? 'Подробный режим' : 'Компактный режим'}</span></div>
-    <div class="groupedEstimate">${groups.map(([category, items]) => `<section class="estimateGroup"><div class="groupHeader"><h3>${category}</h3><span class="badge">${items.length} поз.</span></div><div class="tableWrap"><table><thead>${header(mode)}</thead><tbody>${items.map(item => row(item, zoneName, settings, mode)).join('')}</tbody></table></div></section>`).join('')}</div>`;
+    <div class="groupedEstimate">${groups.map(([category, items]) => `<section class="estimateGroup"><div class="groupHeader"><h3>${escapeHtml(category)}</h3><span class="badge">${items.length} поз.</span></div><div class="tableWrap"><table><thead>${header(mode)}</thead><tbody>${items.map(item => row(item, zoneName, settings, mode)).join('')}</tbody></table></div></section>`).join('')}</div>`;
 }
 
 function header(mode) {
@@ -25,9 +25,9 @@ function header(mode) {
 function row(item, zoneName, settings, mode) {
   const sum = formatMoney(itemCostRub(item, settings));
   if (mode === 'detailed') return `<tr>
-    <td>${zoneName(item.zoneId)}</td><td><input data-item-field="name" data-item-id="${item.id}" value="${item.name}"></td><td><input data-item-field="category" data-item-id="${item.id}" value="${item.category}"></td><td><input data-item-field="unit" data-item-id="${item.id}" value="${item.unit}"></td><td><input type="number" step="0.1" data-item-field="qty" data-item-id="${item.id}" value="${item.qty}"></td><td><input type="number" step="1" data-item-field="unitCost" data-item-id="${item.id}" value="${item.unitCost}"></td><td><select data-item-field="currency" data-item-id="${item.id}"><option value="RUB" ${item.currency==='RUB'?'selected':''}>RUB</option><option value="USD" ${item.currency==='USD'?'selected':''}>USD</option></select></td><td><span class="badge">${item.source}${item.isDerived ? ' / derived' : ' / manual'}</span></td><td><input data-item-field="note" data-item-id="${item.id}" value="${item.note || ''}"></td><td class="money">${sum}</td><td><button class="btn danger small" data-item-delete="${item.id}">Удалить</button></td>
+    <td>${escapeHtml(zoneName(item.zoneId))}</td><td><input data-item-field="name" data-item-id="${escapeAttr(item.id)}" value="${escapeAttr(item.name)}"></td><td><input data-item-field="category" data-item-id="${escapeAttr(item.id)}" value="${escapeAttr(item.category)}"></td><td><input data-item-field="unit" data-item-id="${escapeAttr(item.id)}" value="${escapeAttr(item.unit)}"></td><td><input type="number" step="0.1" data-item-field="qty" data-item-id="${escapeAttr(item.id)}" value="${item.qty}"></td><td><input type="number" step="1" data-item-field="unitCost" data-item-id="${escapeAttr(item.id)}" value="${item.unitCost}"></td><td><select data-item-field="currency" data-item-id="${escapeAttr(item.id)}"><option value="RUB" ${item.currency==='RUB'?'selected':''}>RUB</option><option value="USD" ${item.currency==='USD'?'selected':''}>USD</option></select></td><td><span class="badge">${escapeHtml(item.source)}${item.isDerived ? ' / derived' : ' / manual'}</span></td><td><input data-item-field="note" data-item-id="${escapeAttr(item.id)}" value="${escapeAttr(item.note || '')}"></td><td class="money">${sum}</td><td><button class="btn danger small" data-item-delete="${escapeAttr(item.id)}">Удалить</button></td>
   </tr>`;
-  return `<tr><td>${zoneName(item.zoneId)}</td><td><input data-item-field="name" data-item-id="${item.id}" value="${item.name}"></td><td><input data-item-field="category" data-item-id="${item.id}" value="${item.category}"></td><td><input type="number" step="0.1" data-item-field="qty" data-item-id="${item.id}" value="${item.qty}"></td><td><input type="number" step="1" data-item-field="unitCost" data-item-id="${item.id}" value="${item.unitCost}"></td><td class="money">${sum}</td><td><button class="btn danger small" data-item-delete="${item.id}">Удалить</button></td></tr>`;
+  return `<tr><td>${escapeHtml(zoneName(item.zoneId))}</td><td><input data-item-field="name" data-item-id="${escapeAttr(item.id)}" value="${escapeAttr(item.name)}"></td><td><input data-item-field="category" data-item-id="${escapeAttr(item.id)}" value="${escapeAttr(item.category)}"></td><td><input type="number" step="0.1" data-item-field="qty" data-item-id="${escapeAttr(item.id)}" value="${item.qty}"></td><td><input type="number" step="1" data-item-field="unitCost" data-item-id="${escapeAttr(item.id)}" value="${item.unitCost}"></td><td class="money">${sum}</td><td><button class="btn danger small" data-item-delete="${escapeAttr(item.id)}">Удалить</button></td></tr>`;
 }
 function groupItems(items) {
   const map = new Map();
