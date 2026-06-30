@@ -39,10 +39,19 @@ export function createZone(seed = {}) {
   return {
     id: seed.id || createId('zone'),
     name: seed.name || 'Новая зона',
-    type: seed.type || seed.purpose || 'conference',
-    area: seed.area ?? 25,
-    task: seed.task || seed.primaryTask || 'content',
-    scenario: seed.scenario || '',
+    type: seed.type || seed.purpose || seed.zoneType || 'conference',
+    categoryId: seed.categoryId || '',
+    categoryName: seed.categoryName || '',
+    templateId: seed.templateId || '',
+    area: seed.area ?? seed.defaultArea ?? 25,
+    task: seed.task || seed.primaryTask || seed.defaultScenario || 'content',
+    scenario: seed.scenario || seed.defaultScenario || '',
+    requiredSystemGroups: seed.requiredSystemGroups || [],
+    requiredDependencies: seed.requiredDependencies || [],
+    typicalWorks: seed.typicalWorks || [],
+    requiresEngineerReview: Boolean(seed.requiresEngineerReview),
+    nonTypicalForProject: Boolean(seed.nonTypicalForProject),
+    recommendationReason: seed.recommendationReason || '',
     flags: { install:true, pnr:true, content:false, delivery:true, metal:false, service:false, ...(seed.flags || {}) },
     notes: seed.notes || ''
   };

@@ -3,6 +3,7 @@ import { SUPPLIER_PRICE_CATALOG } from '../data/supplierPriceCatalog.js';
 import { createEstimateItem } from './projectFactory.js';
 import { normalizeCurrency, normalizePriceMode, convertToRub } from './currency.js';
 import { DEFAULT_SETTINGS } from '../data/defaultSettings.js';
+import { getZoneTemplate } from '../data/zoneTaxonomy.js';
 
 const SOURCE_CATALOG = [...SUPPLIER_PRICE_CATALOG, ...CATALOG];
 
@@ -60,16 +61,21 @@ export function normalizeCatalogItem(item) {
 export const LIBRARY = buildLibrary(SOURCE_CATALOG);
 
 export function recommendedCategoriesForZone(zone = {}) {
-  const purpose = String(zone.purpose || zone.type || '').toLowerCase();
-  const task = String(zone.primaryTask || '').toLowerCase();
+  const template = getZoneTemplate(zone.templateId);
+  const purpose = String(zone.purpose || zone.type || zone.categoryId || '').toLowerCase();
+  const task = String(zone.primaryTask || zone.task || '').toLowerCase();
   const flags = zone.flags || {};
   const categories = [];
   const add = (...values) => values.forEach(v => { if (v && !categories.includes(v)) categories.push(v); });
-  if (purpose.includes('conference') || purpose.includes('meeting') || task.includes('conference')) add('ВКС-системы', 'Конференц-системы', 'Микрофоны', 'LCD-панели', 'DSP и усилители', 'Коммутация');
-  if (purpose.includes('hall') || purpose.includes('museum') || flags.content || task.includes('content')) add('LCD-панели', 'LED-экраны', 'Медиасерверы', 'Акустика', 'Коммутация');
-  if (purpose.includes('stage') || purpose.includes('event')) add('Акустика', 'DSP и усилители', 'Микрофоны', 'Свет', 'Коммутация');
-  if (purpose.includes('class') || purpose.includes('education')) add('Интерактивные панели', 'Проекторы', 'Микрофоны', 'Акустика', 'Коммутация');
-  if (purpose.includes('outdoor')) add('LED-экраны', 'Акустика', 'Сеть', 'Крепления и конструкции');
+
+  add(...(zone.requiredSystemGroups || []), ...(template?.requiredSystemGroups || []));
+  if (zone.categoryId === 'meeting-vcs' || purpose.includes('conference') || purpose.includes('meeting') || task.includes('conference')) add('ВКС-системы', 'Конференц-системы', 'Микрофоны', 'LCD-панели', 'DSP и усилители', 'Коммутация');
+  if (zone.categoryId === 'museum-exposition' || purpose.includes('hall') || purpose.includes('museum') || flags.content || task.includes('content')) add('LCD-панели', 'LED-экраны', 'Медиасерверы', 'Акустика', 'Коммутация');
+  if (zone.categoryId === 'events-conference' || purpose.includes('stage') || purpose.includes('event')) add('Акустика', 'DSP и усилители', 'Микрофоны', 'Свет', 'Коммутация');
+  if (zone.categoryId === 'education' || purpose.includes('class') || purpose.includes('education')) add('Интерактивные панели', 'Проекторы', 'Микрофоны', 'Акустика', 'Коммутация');
+  if (zone.categoryId === 'led-large-screens' || purpose.includes('outdoor') || purpose.includes('screen')) add('LED-экраны', 'LCD-панели', 'Медиасерверы', 'Крепления и конструкции', 'Коммутация');
+  if (zone.categoryId === 'control-centers') add('Видеостены', 'LCD-панели', 'Мониторы', 'Коммутация', 'Сеть', 'Кабельная инфраструктура');
+  if (zone.categoryId === 'infrastructure') add('AV-стойки', 'Коммутация', 'Сеть', 'Питание', 'Кабельная инфраструктура');
   if (purpose.includes('vr') || task.includes('wow')) add('VR / AR', 'ПК', 'LCD-панели', 'Акустика');
   if (flags.metal) add('Крепления и конструкции');
   if (flags.delivery) add('Кабельная инфраструктура', 'Сеть');
@@ -90,11 +96,42 @@ function pickCatalogItemsForZone(zone, project, scenario, limit = 6) {
     const candidate = LIBRARY.find(item => item.category === category && ['budget', scenario, 'base', 'premium'].includes(item.scenario) && itemMatchesContext(item, zone, project, scenario) && !seen.has(item.id));
     if (candidate && picked.length < limit) { picked.push(candidate); seen.add(candidate.id); }
   });
+  if (picked.length < Math.min(limit, categories.length)) {
+    categories.forEach(category => {
+      const candidate = LIBRARY.find(item => String(item.category || '').toLowerCase().includes(String(category).toLowerCase().split(' ')[0]) && ['budget', scenario, 'base', 'premium'].includes(item.scenario) && !seen.has(item.id));
+      if (candidate && picked.length < limit) { picked.push(candidate); seen.add(candidate.id); }
+    });
+  }
   if (picked.length < limit) {
     LIBRARY.filter(item => ['budget', scenario, 'base'].includes(item.scenario) && itemMatchesContext(item, zone, project, scenario) && !seen.has(item.id))
       .slice(0, limit - picked.length).forEach(item => { picked.push(item); seen.add(item.id); });
   }
   return picked;
+}
+
+function addDerivedWorkItems(project, zone, existingKeys) {
+  let added = 0;
+  const works = Object.entries(zone.flags || {}).filter(([, enabled]) => enabled).map(([key]) => key);
+  const deps = zone.requiredDependencies || [];
+  const rows = [];
+  if (works.includes('install')) rows.push(['Монтажные работы', 'Монтаж оборудования и кабельной инфраструктуры', 1, 0, 'install']);
+  if (works.includes('pnr')) rows.push(['ПНР', 'Пусконаладка, настройка и пользовательские сценарии', 1, 0, 'pnr']);
+  if (works.includes('content')) rows.push(['Контент / ПО', 'Подготовка, загрузка и проверка контента / ПО', 1, 0, 'content']);
+  if (works.includes('delivery')) rows.push(['Логистика', 'Доставка, упаковка и перемещение оборудования', 1, 0, 'delivery']);
+  if (works.includes('metal') || deps.some(d => /креп/i.test(d))) rows.push(['Крепления и конструкции', 'Крепления, конструкции и монтажные материалы', 1, 0, 'metal']);
+  if (deps.some(d => /пит/i.test(d))) rows.push(['Питание', 'Проверка питания и резервов мощности', 1, 0, 'power']);
+  rows.forEach(([category, name, qty, price, key]) => {
+    const derivedKey = `${zone.id}:work:${key}`;
+    if (existingKeys.has(derivedKey)) return;
+    project.estimateItems.push(createEstimateItem({
+      zoneId: zone.id, name, category, unit: 'компл.', qty, currency: 'RUB', unitCost: price,
+      priceMode: 'fixed', source: 'derived', isManual: false, isDerived: true, derivedKey,
+      note: `Автоматически добавлено по шаблону зоны «${zone.name}».`
+    }));
+    existingKeys.add(derivedKey);
+    added += 1;
+  });
+  return added;
 }
 
 
@@ -144,7 +181,8 @@ export function generateEstimateFromZones(project, options = {}) {
 
   const existingKeys = new Set(project.estimateItems.map(i => i.derivedKey).filter(Boolean));
   const scenario = project.passport?.scenario || 'base';
-  project.zones.forEach(zone => {
+  const zonesToProcess = options.zoneId ? project.zones.filter(zone => zone.id === options.zoneId) : project.zones;
+  zonesToProcess.forEach(zone => {
     if (!zone.type) {
       report.skippedZones.push({ id: zone.id, name: zone.name, reason: 'Не выбран тип зоны' });
       return;
@@ -154,7 +192,8 @@ export function generateEstimateFromZones(project, options = {}) {
       report.skippedZones.push({ id: zone.id, name: zone.name, reason: 'Нет подходящих позиций каталога' });
       return;
     }
-    report.processedZones.push({ id: zone.id, name: zone.name, count: matching.length });
+    report.processedZones.push({ id: zone.id, name: zone.name, count: matching.length, categoryId: zone.categoryId, templateId: zone.templateId });
+    report.added += addDerivedWorkItems(project, zone, existingKeys);
     matching.forEach(item => {
       const derivedKey = `${zone.id}:${item.id}`;
       if (existingKeys.has(derivedKey)) return;

@@ -5,46 +5,93 @@ import { ZoneCard } from '../components/ZoneCard.js';
 import { ensureProject, persistProject } from '../app/state.js';
 import { createZone } from '../engine/projectFactory.js';
 import { generateEstimateFromZones } from '../engine/estimate.js';
-import { INSTALLATION_TEMPLATES } from '../data/installationTemplates.js';
 import { toast } from '../utils/dom.js';
+import { PROJECT_TYPES } from '../data/projectTypes.js';
+import { ZONE_CATEGORIES, getCategoriesForProject, getProjectZoneModel, getTemplatesForProject, getZoneCategory, createZoneSeedFromTemplate } from '../data/zoneTaxonomy.js';
 
 export function ZonesPage(root) {
   const p = ensureProject();
+  const projectTypeId = p.passport?.projectType || 'corporate';
+  const projectType = PROJECT_TYPES.find(t => t.id === projectTypeId) || PROJECT_TYPES[0];
+  const model = getProjectZoneModel(projectTypeId);
   const q = new URLSearchParams(location.hash.split('?')[1] || '');
-  const search = q.get('q') || ''; const templateFilter = q.get('filter') || 'all';
-  const templates = filteredTemplates(search, templateFilter).slice(0, 12);
-  root.innerHTML = AppLayout(`${PageHeader({ title: 'Зоны', description: 'Соберите структуру объекта и переходите к смете.', actions: '<button class="btn primary" data-add-zone>Добавить зону</button><button class="btn ghost" data-add-typical>Добавить типовые зоны</button><button class="btn ghost" data-generate-estimate>Сгенерировать смету по зонам</button>' })}
-  ${p.zones.length ? `<div class="grid zoneGrid">${p.zones.map(ZoneCard).join('')}</div>` : EmptyState({ title: 'Зоны ещё не добавлены', text: 'Добавьте зоны вручную или создайте типовые зоны для выбранного типа проекта.', actions: '<button class="btn primary" data-add-zone>Добавить зону</button><button class="btn ghost" data-add-typical>Создать типовые зоны</button>' })}
+  const search = q.get('q') || '';
+  const categoryFilter = q.get('category') || 'all';
+  const showAll = q.get('all') === '1';
+  const categories = getCategoriesForProject(projectTypeId, showAll);
+  const templates = getTemplatesForProject(projectTypeId, { showAll, search, categoryId: categoryFilter });
+  const groupedTemplates = groupByCategory(templates);
+  const typeLabel = projectType?.name || 'тип проекта';
+
+  root.innerHTML = AppLayout(`${PageHeader({ title: 'Зоны', description: `Тип проекта: ${typeLabel}. Калькулятор показывает релевантные категории, шаблоны и зависимости.`, actions: '<button class="btn primary" data-add-zone>Добавить зону вручную</button><button class="btn ghost" data-add-typical>Добавить типовые зоны</button><button class="btn ghost" data-generate-estimate>Сгенерировать смету по зонам</button>' })}
+  <section class="card zoneModelPanel">
+    <div class="sectionTitle"><div><h3>Категории для типа проекта</h3><p class="muted">${model.typicalScenario}</p></div><span class="badge ${model.requiresEngineerReview ? 'warn' : 'ok'}">${model.requiresEngineerReview ? 'инженерная проверка' : 'типовой сценарий'}</span></div>
+    <div class="categoryPills">${categories.map(c => `<button class="categoryPill ${categoryFilter === c.id ? 'active' : ''} ${c.isRecommended ? '' : 'mutedPill'}" data-category-filter="${c.id}"><span>${c.icon}</span><strong>${c.name}</strong><small>${c.isRecommended ? 'релевантна' : 'нетиповая'}</small></button>`).join('')}</div>
+    <div class="actions"><button class="btn ${categoryFilter === 'all' ? 'primary' : 'ghost'} small" data-category-filter="all">Все релевантные</button><button class="btn ${showAll ? 'warn' : 'ghost'} small" data-toggle-all>${showAll ? 'Скрыть нетиповые категории' : 'Показать все категории'}</button></div>
+  </section>
+
+  ${p.zones.length ? `<div class="grid zoneGrid">${p.zones.map(ZoneCard).join('')}</div>` : EmptyState({ title: 'Зоны ещё не добавлены', text: 'Добавьте default-набор для выбранного типа проекта или выберите конкретные шаблоны ниже.', actions: '<button class="btn primary" data-add-typical>Добавить типовые зоны</button><button class="btn ghost" data-add-zone>Добавить вручную</button>' })}
+
   <div class="separator"></div>
-  <section class="card templatePanel"><div class="sectionTitle"><h3>Типовые зоны</h3><span class="muted">Короткий список без библиотеки оборудования</span></div>
-    <div class="grid cols3"><label class="field"><span>Поиск</span><input data-template-search value="${search}" placeholder="переговорная, зал, lobby"></label><label class="field"><span>Фильтр</span><select data-template-filter><option value="all" ${templateFilter==='all'?'selected':''}>Все шаблоны</option><option value="conference" ${templateFilter==='conference'?'selected':''}>Переговорные</option><option value="hall" ${templateFilter==='hall'?'selected':''}>Залы / public</option><option value="content" ${templateFilter==='content'?'selected':''}>Контент</option></select></label><div class="field"><span>&nbsp;</span><button class="btn ghost" data-reset-template-filter>Сбросить</button></div></div>
-    ${templates.length ? `<div class="libraryGrid compactTemplates">${templates.map(t=>`<article class="card itemCard"><div class="itemTitle">${t.name}</div><div class="muted smallText">${t.goal || 'Типовая зона'}</div><button class="btn ghost small" data-template-zone="${t.id}">Добавить</button></article>`).join('')}</div>` : EmptyState({ title: 'Ничего не найдено', text: 'Сбросьте фильтры или добавьте зону вручную.', actions: '<button class="btn ghost" data-reset-template-filter>Сбросить фильтры</button><button class="btn primary" data-add-zone>Добавить зону</button>' })}
+  <section class="card templatePanel"><div class="sectionTitle"><div><h3>Шаблоны зон</h3><p class="muted">Поиск работает по названию, категории, назначению, AV-группам и тегам.</p></div><span class="badge">${templates.length} шаблонов</span></div>
+    <div class="grid cols3"><label class="field"><span>Поиск</span><input data-template-search value="${search}" placeholder="переговорная, LED, музей, операторская"></label><label class="field"><span>Категория</span><select data-template-category><option value="all" ${categoryFilter==='all'?'selected':''}>Все категории в выдаче</option>${ZONE_CATEGORIES.map(c=>`<option value="${c.id}" ${categoryFilter===c.id?'selected':''}>${c.name}</option>`).join('')}</select></label><div class="field"><span>&nbsp;</span><button class="btn ghost" data-reset-template-filter>Сбросить</button></div></div>
+    ${templates.length ? Object.entries(groupedTemplates).map(([categoryId, items]) => templateGroup(categoryId, items, model)).join('') : EmptyState({ title: 'Ничего не найдено', text: 'Сбросьте фильтры, включите все категории или добавьте зону вручную.', actions: '<button class="btn ghost" data-reset-template-filter>Сбросить фильтры</button><button class="btn primary" data-add-zone>Добавить зону</button>' })}
   </section>`);
-  bindLayoutActions(root); bind(root,p);
+  bindLayoutActions(root); bind(root,p,{search,categoryFilter,showAll,projectTypeId});
 }
-function filteredTemplates(search, filter) {
-  return INSTALLATION_TEMPLATES.filter(t => {
-    const text = `${t.name} ${t.goal || ''} ${t.zone?.type || ''} ${t.zone?.task || ''}`.toLowerCase();
-    const matchesSearch = !search || text.includes(search.toLowerCase());
-    const matchesFilter = filter === 'all' || text.includes(filter);
-    return matchesSearch && matchesFilter;
+
+function groupByCategory(templates) {
+  return templates.reduce((acc, template) => { (acc[template.categoryId] ||= []).push(template); return acc; }, {});
+}
+
+function templateGroup(categoryId, items, model) {
+  const category = getZoneCategory(categoryId);
+  const isRecommended = model.allowedZoneCategoryIds.includes(categoryId);
+  return `<div class="templateCategoryGroup"><div class="groupHeader"><div><h3>${category?.icon || '•'} ${category?.name || 'Категория'}</h3><p class="muted">${category?.description || ''}</p></div><span class="badge ${isRecommended ? 'ok' : 'warn'}">${isRecommended ? 'для типа проекта' : 'нетиповая'}</span></div>
+  <div class="libraryGrid compactTemplates">${items.map(t=>templateCard(t, model)).join('')}</div></div>`;
+}
+
+function templateCard(t, model) {
+  const category = getZoneCategory(t.categoryId);
+  const isRecommended = model.allowedZoneCategoryIds.includes(t.categoryId);
+  const isDefault = model.defaultZoneTemplateIds.includes(t.id);
+  const why = isDefault ? 'Входит в типовой набор проекта.' : isRecommended ? `Релевантная категория: ${category?.name || 'категория зоны'}.` : 'Эта зона не типовая для выбранного типа проекта, но её можно добавить вручную.';
+  return `<article class="card itemCard ${isRecommended ? '' : 'nonTypicalTemplate'}"><div class="itemTitle">${t.name}</div><div class="zoneMeta"><span class="badge lime">${category?.name || ''}</span>${isDefault ? '<span class="badge ok">default</span>' : ''}${t.requiresEngineerReview ? '<span class="badge warn">инж. проверка</span>' : ''}</div><div class="muted smallText">${t.description}</div><div class="muted smallText">${why}</div><div class="zoneMeta">${t.requiredSystemGroups.slice(0,4).map(g=>`<span class="badge">${g}</span>`).join('')}${t.requiredSystemGroups.length > 4 ? `<span class="badge">+${t.requiredSystemGroups.length - 4}</span>` : ''}</div><button class="btn ${isRecommended ? 'ghost' : 'warn'} small" data-template-zone="${t.id}">Добавить</button></article>`;
+}
+
+function addTypicalZones(p) {
+  const projectTypeId = p.passport?.projectType || 'corporate';
+  const model = getProjectZoneModel(projectTypeId);
+  const templates = getTemplatesForProject(projectTypeId, { showAll: true }).filter(t => model.defaultZoneTemplateIds.includes(t.id));
+  const existing = new Set((p.zones || []).map(z => z.templateId).filter(Boolean));
+  templates.forEach(t => {
+    if (!existing.has(t.id)) p.zones.push(createZone(createZoneSeedFromTemplate(t, projectTypeId)));
   });
 }
-function addTypicalZones(p) {
-  const sample = INSTALLATION_TEMPLATES.slice(0, 4);
-  sample.forEach(t => p.zones.push(createZone({ name: t.name, ...(t.zone || {}) })));
-}
-function bind(root,p){
-  root.querySelectorAll('[data-add-zone]').forEach(btn=>btn.addEventListener('click',()=>{p.zones.push(createZone({name:`Зона ${p.zones.length+1}`})); persistProject(); ZonesPage(root);}));
-  root.querySelectorAll('[data-add-typical]').forEach(btn=>btn.addEventListener('click',()=>{addTypicalZones(p); persistProject(); toast('Типовые зоны добавлены'); ZonesPage(root);}));
+
+function bind(root,p,ctx){
+  const setHash = (next = {}) => {
+    const params = new URLSearchParams();
+    const q = next.search ?? root.querySelector('[data-template-search]')?.value ?? ctx.search;
+    const category = next.category ?? root.querySelector('[data-template-category]')?.value ?? ctx.categoryFilter;
+    const all = next.showAll ?? ctx.showAll;
+    if (q) params.set('q', q);
+    if (category && category !== 'all') params.set('category', category);
+    if (all) params.set('all', '1');
+    location.hash = `#/zones${params.toString() ? `?${params}` : ''}`;
+  };
+  root.querySelectorAll('[data-add-zone]').forEach(btn=>btn.addEventListener('click',()=>{p.zones.push(createZone({name:`Зона ${p.zones.length+1}`, recommendationReason: 'Добавлена вручную. Выберите категорию / шаблон при необходимости.'})); persistProject(); ZonesPage(root);}));
+  root.querySelectorAll('[data-add-typical]').forEach(btn=>btn.addEventListener('click',()=>{const before = p.zones.length; addTypicalZones(p); persistProject(); toast(`Типовые зоны добавлены: ${p.zones.length - before}`); ZonesPage(root);}));
   root.querySelector('[data-generate-estimate]')?.addEventListener('click',()=>{const report = generateEstimateFromZones(p, { mode: 'replace' }); persistProject(); toast(`Добавлено строк: ${report.added}`); location.hash = '#/estimate';});
-  root.querySelectorAll('[data-template-zone]').forEach(btn=>btn.addEventListener('click',()=>{const t=INSTALLATION_TEMPLATES.find(x=>x.id===btn.dataset.templateZone); p.zones.push(createZone({name:t.name, ...(t.zone||{})})); persistProject(); ZonesPage(root);}));
+  root.querySelectorAll('[data-template-zone]').forEach(btn=>btn.addEventListener('click',()=>{const t=getTemplatesForProject(ctx.projectTypeId, { showAll: true }).find(x=>x.id===btn.dataset.templateZone); if(!t) return; p.zones.push(createZone(createZoneSeedFromTemplate(t, ctx.projectTypeId))); persistProject(); if(!getProjectZoneModel(ctx.projectTypeId).allowedZoneCategoryIds.includes(t.categoryId)) toast('Зона добавлена как нетиповая для проекта'); ZonesPage(root);}));
   root.querySelectorAll('[data-zone-delete]').forEach(btn=>btn.addEventListener('click',()=>{p.zones=p.zones.filter(z=>z.id!==btn.dataset.zoneDelete); p.estimateItems.forEach(i=>{if(i.zoneId===btn.dataset.zoneDelete)i.zoneId='';}); persistProject(); ZonesPage(root);}));
   root.querySelectorAll('[data-zone-duplicate]').forEach(btn=>btn.addEventListener('click',()=>{const z=p.zones.find(x=>x.id===btn.dataset.zoneDuplicate); if(!z) return; p.zones.push(createZone({...structuredClone(z), id: undefined, name: `${z.name} · копия`})); persistProject(); ZonesPage(root);}));
-  root.querySelectorAll('[data-zone-estimate]').forEach(btn=>btn.addEventListener('click',()=>{const report = generateEstimateFromZones(p, { mode: 'append' }); persistProject(); toast(`Смета обновлена. Добавлено строк: ${report.added}`); location.hash = '#/estimate';}));
+  root.querySelectorAll('[data-zone-estimate]').forEach(btn=>btn.addEventListener('click',()=>{const report = generateEstimateFromZones(p, { mode: 'append', zoneId: btn.dataset.zoneEstimate }); persistProject(); toast(`Смета обновлена. Добавлено строк: ${report.added}`); location.hash = '#/estimate';}));
   root.querySelectorAll('[data-zone-field]').forEach(el=>el.addEventListener('input',()=>{const z=p.zones.find(x=>x.id===el.dataset.zoneId); z[el.dataset.zoneField]=el.type==='number'?Number(el.value):el.value; persistProject();}));
   root.querySelectorAll('[data-zone-flag]').forEach(el=>el.addEventListener('change',()=>{const z=p.zones.find(x=>x.id===el.dataset.zoneId); z.flags[el.dataset.zoneFlag]=el.checked; persistProject(); ZonesPage(root);}));
-  const updateHash=()=>{const q=root.querySelector('[data-template-search]')?.value || ''; const f=root.querySelector('[data-template-filter]')?.value || 'all'; location.hash=`#/zones?q=${encodeURIComponent(q)}&filter=${encodeURIComponent(f)}`;};
-  root.querySelector('[data-template-search]')?.addEventListener('change',updateHash); root.querySelector('[data-template-filter]')?.addEventListener('change',updateHash);
+  root.querySelector('[data-template-search]')?.addEventListener('change',()=>setHash());
+  root.querySelector('[data-template-category]')?.addEventListener('change',()=>setHash());
+  root.querySelectorAll('[data-category-filter]').forEach(btn=>btn.addEventListener('click',()=>setHash({category: btn.dataset.categoryFilter})));
+  root.querySelector('[data-toggle-all]')?.addEventListener('click',()=>setHash({showAll: !ctx.showAll}));
   root.querySelectorAll('[data-reset-template-filter]').forEach(btn=>btn.addEventListener('click',()=>{location.hash='#/zones';}));
 }
