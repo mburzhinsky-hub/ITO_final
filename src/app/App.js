@@ -12,5 +12,5 @@ registerRoute('proposal', () => import('../pages/ProposalPage.js').then(m => m.P
 registerRoute('library', () => import('../pages/LibraryPage.js').then(m => m.LibraryPage));
 registerRoute('settings', () => import('../pages/SettingsPage.js').then(m => m.SettingsPage));
 
-mountWelcomeIntro();
 startRouter(root);
+mountWelcomeIntro();

@@ -2,7 +2,7 @@ import { AppLayout, bindLayoutActions } from '../components/AppLayout.js';
 import { PageHeader } from '../components/PageHeader.js';
 import { EmptyState } from '../components/EmptyState.js';
 import { ensureProject, persistProject, getSettings } from '../app/state.js';
-import { LIBRARY, addCatalogItemToProject, buildLibrary } from '../engine/estimate.js';
+import { LIBRARY, addCatalogItemToProject } from '../engine/estimate.js';
 import { createEstimateItem, createZone } from '../engine/projectFactory.js';
 import { toast } from '../utils/dom.js';
 import { LibraryFilters } from '../components/LibraryFilters.js';
@@ -11,20 +11,20 @@ import { InstallationTemplateList } from '../components/InstallationTemplateList
 import { INSTALLATION_TEMPLATES } from '../data/installationTemplates.js';
 import { catalogQualitySummary } from '../engine/catalogValidation.js';
 import { resolveMissingDependencies, createDependencyFallbackItem } from '../engine/dependencyResolver.js';
-import { getItemAlternatives, replacementImpact } from '../engine/alternativeResolver.js';
+import { replacementImpact } from '../engine/alternativeResolver.js';
+import { loadSuppliersMeta, loadSupplierById, loadSupplierCatalog, getLoadedSupplierLibrary, getSupplierCatalogStatus } from '../data/suppliers/loadSupplierCatalog.js';
+import { classifyCatalogScope, catalogScopeLabel, visibleScopesForMode } from '../engine/catalogRelevance.js';
 
-let fullLibrary = null;
-let fullLibraryPromise = null;
+let supplierMeta = null;
+let supplierMetaPromise = null;
 
-async function loadFullLibrary() {
-  if (fullLibrary) return fullLibrary;
-  if (!fullLibraryPromise) {
-    fullLibraryPromise = import('../data/supplierPriceCatalog.js').then(({ SUPPLIER_PRICE_CATALOG }) => {
-      fullLibrary = buildLibrary([...SUPPLIER_PRICE_CATALOG, ...LIBRARY]);
-      return fullLibrary;
-    });
+function requestSupplierMeta(root) {
+  if (supplierMeta) return;
+  if (!supplierMetaPromise) {
+    supplierMetaPromise = loadSuppliersMeta()
+      .then(meta => { supplierMeta = meta; LibraryPage(root); })
+      .catch(error => { console.error(error); toast('Не удалось загрузить метаданные поставщиков'); });
   }
-  return fullLibraryPromise;
 }
 
 export function LibraryPage(root) {
@@ -33,25 +33,49 @@ export function LibraryPage(root) {
   const q = new URLSearchParams(location.hash.split('?')[1] || '');
   const state = readState(q);
   const tab = q.get('tab') || 'equipment';
-  const includeSuppliers = q.get('suppliers') === '1';
-  if (includeSuppliers && !fullLibrary) {
-    root.innerHTML = AppLayout(`${PageHeader({ title: 'Библиотека', description: 'Загружаем полный каталог поставщиков. Обычные страницы калькулятора больше не ждут этот тяжёлый файл.', actions: '<a class="btn ghost" href="#/library">Открыть быстрый каталог</a>' })}<section class="card"><h3>Загрузка прайс-листов</h3><p class="muted">Полный каталог вынесен в ленивую загрузку, чтобы остальные страницы открывались быстро.</p></section>`);
+  const loadAll = q.get('loadSuppliers') === 'all';
+  const requestedSupplierId = q.get('supplier') || '';
+  const supplierStatus = getSupplierCatalogStatus();
+
+  requestSupplierMeta(root);
+
+  if (loadAll && supplierMeta && supplierStatus.loadedItemCount < supplierMeta.totalItems) {
+    root.innerHTML = loadingLayout('Загружаем полный прайс поставщиков', 'Позиции поставщиков подгружаются только после явного действия пользователя. Быстрая библиотека остаётся доступной отдельно.');
     bindLayoutActions(root);
-    loadFullLibrary().then(() => LibraryPage(root)).catch(error => { console.error(error); toast('Не удалось загрузить полный каталог поставщиков'); location.hash = '#/library'; });
+    loadSupplierCatalog().then(() => LibraryPage(root)).catch(error => { console.error(error); toast('Не удалось загрузить полный каталог поставщиков'); location.hash = '#/library'; });
     return;
   }
-  const library = includeSuppliers ? fullLibrary : LIBRARY;
+
+  if (requestedSupplierId && supplierMeta && !supplierStatus.loadedSupplierIds.includes(requestedSupplierId)) {
+    const supplier = supplierMeta.suppliers.find(item => item.id === requestedSupplierId);
+    root.innerHTML = loadingLayout(`Загружаем поставщика ${supplier?.name || requestedSupplierId}`, 'Остальные supplier-файлы не загружаются автоматически.');
+    bindLayoutActions(root);
+    loadSupplierById(requestedSupplierId).then(() => LibraryPage(root)).catch(error => { console.error(error); toast('Не удалось загрузить выбранного поставщика'); location.hash = '#/library'; });
+    return;
+  }
+
+  const library = getLoadedSupplierLibrary(LIBRARY);
   const quality = catalogQualitySummary(library);
-  const items = filterLibrary(library, state).slice(0, 72);
+  const filteredItems = filterLibrary(library, state);
+  const items = filteredItems.slice(0, Number(state.limit || 72));
   const templates = filterTemplates(INSTALLATION_TEMPLATES, state).slice(0, 30);
   const deps = resolveMissingDependencies(p).slice(0, 12);
-  const supplierAction = includeSuppliers ? '<a class="btn ghost small" href="#/library">Быстрый каталог</a>' : '<a class="btn ghost small" href="#/library?suppliers=1">Загрузить прайс-листы</a>';
-  root.innerHTML = AppLayout(`${PageHeader({ title: 'Библиотека', description: 'Экспертная библиотека оборудования, зависимостей, альтернатив и шаблонов инсталляций. Полный каталог поставщиков загружается только по запросу.', actions: `<span class="badge lime">${library.length} позиций</span><span class="badge ${quality.errors ? 'warn' : 'ok'}">качество: ${quality.totalIssues}</span>${supplierAction}` })}
+  const supplierPanelHtml = supplierPanel(supplierMeta, supplierStatus, state);
+  const supplierAction = supplierStatus.loadedItemCount
+    ? '<a class="btn ghost small" href="#/library">Быстрый каталог</a>'
+    : '<button class="btn ghost small" data-load-all-suppliers>Загрузить полный прайс поставщиков</button>';
+
+  root.innerHTML = AppLayout(`${PageHeader({ title: 'Библиотека', description: 'Быстрая AV-библиотека доступна сразу. Полные прайсы поставщиков лежат в public/data/suppliers/*.json и загружаются только по кнопке или выбору поставщика.', actions: `<span class="badge lime">${LIBRARY.length} быстрых</span><span class="badge">${supplierStatus.loadedItemCount} supplier</span><span class="badge ${quality.errors ? 'warn' : 'ok'}">качество: ${quality.totalIssues}</span>${supplierAction}` })}
+    ${supplierPanelHtml}
     <div class="libraryTabs"><a class="btn ${tab === 'equipment' ? 'primary' : 'ghost'} small" href="#/library?tab=equipment">Оборудование</a><a class="btn ${tab === 'templates' ? 'primary' : 'ghost'} small" href="#/library?tab=templates">Шаблоны инсталляций</a><a class="btn ${tab === 'quality' ? 'primary' : 'ghost'} small" href="#/library?tab=quality">Качество данных</a></div>
-    ${tab === 'equipment' ? equipmentTab(p, settings, state, items, deps, library) : ''}
+    ${tab === 'equipment' ? equipmentTab(p, settings, state, items, deps, library, filteredItems.length) : ''}
     ${tab === 'templates' ? templatesTab(state, templates) : ''}
     ${tab === 'quality' ? qualityTab(quality, deps) : ''}`);
   bindLayoutActions(root); bind(root, p, state, library);
+}
+
+function loadingLayout(title, text) {
+  return AppLayout(`${PageHeader({ title: 'Библиотека', description: 'Supplier-каталог вынесен из стартовой загрузки.', actions: '<a class="btn ghost" href="#/library">Вернуться в быстрый каталог</a>' })}<section class="card"><h3>${title}</h3><p class="muted">${text}</p></section>`);
 }
 
 function readState(q) {
@@ -64,18 +88,34 @@ function readState(q) {
     price: q.get('price') || 'all',
     projectType: q.get('projectType') || 'all',
     zoneCategory: q.get('zoneCategory') || 'all',
-    review: q.get('review') || 'all'
+    review: q.get('review') || 'all',
+    scope: q.get('scope') || 'default',
+    supplier: q.get('supplier') || 'all',
+    limit: q.get('limit') || '72'
   };
 }
 
-function equipmentTab(project, settings, state, items, deps, library) {
-  return `${LibraryFilters({ ...state, zones: project.zones || [] })}
-    ${deps.length ? `<div class="notice warn"><strong>В проекте есть незакрытые зависимости: ${deps.length}</strong><p>Откройте проверку или добавьте fallback-позиции вручную. Библиотека показывает зависимости, но не добавляет их принудительно без действия пользователя.</p><div class="actions">${deps.slice(0, 4).map(dep => `<button class="btn ghost small" data-add-dependency-fallback="${dep.id}">${dep.fallbackName}</button>`).join('')}<a class="btn ghost small" href="#/check">Проверка</a></div></div>` : ''}
-    <div class="separator"></div>${items.length ? `<div class="libraryGrid">${items.map(item => EquipmentCard(item, settings, library)).join('')}</div>` : EmptyState({ title: 'Ничего не найдено', text: 'Сбросьте фильтры или добавьте ручную позицию.', actions: '<button class="btn ghost" data-reset-library>Сбросить фильтры</button><button class="btn primary" data-add-manual-lib>Добавить ручную позицию</button>' })}`;
+function equipmentTab(project, settings, state, items, deps, library, total) {
+  const shown = Math.min(total, Number(state.limit || 72));
+  return `${LibraryFilters({ ...state, zones: project.zones || [], suppliers: supplierMeta?.suppliers || [] })}
+    <div class="notice"><strong>Показано ${shown} из ${total}</strong><p>Каталог не рендерит десятки тысяч карточек сразу. Для supplier-позиций по умолчанию видны AV-ядро, AV-инфраструктура и работы/услуги.</p>${total > shown ? `<div class="actions"><button class="btn ghost small" data-show-more>Показать ещё</button></div>` : ''}</div>
+    ${deps.length ? `<div class="notice warn"><strong>В проекте есть незакрытые зависимости: ${deps.length}</strong><p>Откройте проверку или добавьте fallback-позиции вручную.</p><div class="actions">${deps.slice(0, 4).map(dep => `<button class="btn ghost small" data-add-dependency-fallback="${dep.id}">${dep.fallbackName}</button>`).join('')}<a class="btn ghost small" href="#/check">Проверка</a></div></div>` : ''}
+    <div class="separator"></div>${items.length ? `<div class="libraryGrid">${items.map(item => EquipmentCard(item, settings, library)).join('')}</div>` : EmptyState({ title: 'Ничего не найдено', text: 'Сбросьте фильтры, выберите поставщика или загрузите полный прайс.', actions: '<button class="btn ghost" data-reset-library>Сбросить фильтры</button><button class="btn primary" data-add-manual-lib>Добавить ручную позицию</button>' })}`;
+}
+
+function supplierPanel(meta, status, state) {
+  if (!meta) return `<section class="card"><div class="sectionTitle"><div><h3>Прайсы поставщиков</h3><p class="muted">Быстрый каталог уже доступен. Метаданные поставщиков загружаются отдельно маленьким JSON-файлом.</p></div><span class="badge">metadata</span></div></section>`;
+  const visibleSuppliers = meta.suppliers.slice(0, 20);
+  const scopeStats = Object.entries(meta.scopes || {}).map(([scope, count]) => `<span class="badge">${catalogScopeLabel(scope)}: ${count.toLocaleString('ru-RU')}</span>`).join('');
+  return `<section class="card supplierCatalogPanel">
+    <div class="sectionTitle"><div><h3>Прайсы поставщиков</h3><p class="muted">${meta.supplierCount} поставщиков, ${meta.totalItems.toLocaleString('ru-RU')} позиций. Загружено в память: ${status.loadedItemCount.toLocaleString('ru-RU')}.</p></div><div class="actions"><button class="btn ghost small" data-load-all-suppliers>Загрузить всех поставщиков</button><a class="btn ghost small" href="#/library">Только быстрый каталог</a></div></div>
+    <div class="tagRow">${scopeStats}</div>
+    <div class="miniList">${visibleSuppliers.map(supplier => `<a class="miniListItem" href="#/library?supplier=${supplier.id}&scope=${state.scope || 'default'}"><span class="badge ${status.loadedSupplierIds.includes(supplier.id) ? 'ok' : ''}">${status.loadedSupplierIds.includes(supplier.id) ? 'загружен' : 'по клику'}</span><strong>${supplier.name}</strong><small>${supplier.itemCount.toLocaleString('ru-RU')} позиций · ${(supplier.fileSize / 1024 / 1024).toFixed(1)} MB</small></a>`).join('')}</div>
+  </section>`;
 }
 
 function templatesTab(state, templates) {
-  return `${LibraryFilters({ ...state, zones: [] })}<div class="separator"></div>${InstallationTemplateList(templates)}`;
+  return `${LibraryFilters({ ...state, zones: [], suppliers: supplierMeta?.suppliers || [] })}<div class="separator"></div>${InstallationTemplateList(templates)}`;
 }
 
 function qualityTab(quality, deps) {
@@ -84,10 +124,14 @@ function qualityTab(quality, deps) {
 }
 
 function filterLibrary(library, state) {
-  const search = state.search.toLowerCase();
+  const searchTerms = String(state.search || '').toLowerCase().replace(/ё/g, 'е').split(/\s+/).filter(Boolean);
+  const visibleScopes = new Set(visibleScopesForMode(state.scope));
   return library.filter(item => {
-    const haystack = `${item.name} ${item.brand} ${item.model} ${item.category} ${item.supplier || ''} ${(item.tags || []).join(' ')}`.toLowerCase();
-    if (search && !haystack.includes(search)) return false;
+    const scope = classifyCatalogScope(item);
+    if (item.supplier && !visibleScopes.has(scope)) return false;
+    if (state.supplier !== 'all' && item.supplierId !== state.supplier && item.supplier !== state.supplier) return false;
+    const haystack = `${item.name} ${item.brand} ${item.model} ${item.article || ''} ${item.category} ${item.supplier || ''} ${(item.tags || []).join(' ')}`.toLowerCase().replace(/ё/g, 'е');
+    if (searchTerms.length && !searchTerms.every(term => haystack.includes(term))) return false;
     if (state.category !== 'all' && item.categoryId !== state.category) return false;
     if (state.subcategory !== 'all' && item.subcategoryId !== state.subcategory) return false;
     if (state.level !== 'all' && item.solutionLevel !== state.level) return false;
@@ -113,7 +157,6 @@ function filterTemplates(templates, state) {
   });
 }
 
-
 function ensureTemplateZone(project, template) {
   const existing = (project.zones || []).find(zone => template.zoneTemplateIds.includes(zone.templateId) || template.zoneCategoryIds.includes(zone.categoryId));
   if (existing) return existing;
@@ -135,22 +178,26 @@ function ensureTemplateZone(project, template) {
 }
 
 function bind(root, p, state, library) {
-  const updateHash = () => {
+  let searchTimer = null;
+  const updateHash = (patch = {}) => {
     const params = new URLSearchParams();
     const current = new URLSearchParams(location.hash.split('?')[1] || '');
     params.set('tab', current.get('tab') || 'equipment');
-    if (current.get('suppliers') === '1') params.set('suppliers', '1');
     const fields = [
       ['q', '[data-lib-search]'], ['category', '[data-lib-category]'], ['subcategory', '[data-lib-subcategory]'], ['level', '[data-lib-level]'],
-      ['currency', '[data-lib-currency]'], ['price', '[data-lib-price]'], ['projectType', '[data-lib-project-type]'], ['zoneCategory', '[data-lib-zone-category]'], ['review', '[data-lib-review]']
+      ['currency', '[data-lib-currency]'], ['price', '[data-lib-price]'], ['projectType', '[data-lib-project-type]'], ['zoneCategory', '[data-lib-zone-category]'], ['review', '[data-lib-review]'], ['scope', '[data-lib-scope]'], ['supplier', '[data-lib-supplier]']
     ];
-    fields.forEach(([key, selector]) => { const value = root.querySelector(selector)?.value || 'all'; if (value && !(key !== 'q' && value === 'all')) params.set(key, value); });
+    fields.forEach(([key, selector]) => { const value = root.querySelector(selector)?.value || (key === 'q' ? '' : 'all'); if (value && !(key !== 'q' && value === 'all') && !(key === 'scope' && value === 'default')) params.set(key, value); });
+    Object.entries(patch).forEach(([key, value]) => { if (value === null) params.delete(key); else params.set(key, value); });
     location.hash = `#/library?${params.toString()}`;
   };
-  ['change'].forEach(eventName => root.querySelectorAll('[data-lib-search],[data-lib-category],[data-lib-subcategory],[data-lib-level],[data-lib-currency],[data-lib-price],[data-lib-project-type],[data-lib-zone-category],[data-lib-review]').forEach(el => el.addEventListener(eventName, updateHash)));
+  root.querySelectorAll('[data-lib-category],[data-lib-subcategory],[data-lib-level],[data-lib-currency],[data-lib-price],[data-lib-project-type],[data-lib-zone-category],[data-lib-review],[data-lib-scope],[data-lib-supplier]').forEach(el => el.addEventListener('change', () => updateHash()));
+  root.querySelector('[data-lib-search]')?.addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => updateHash(), 300); });
+  root.querySelector('[data-load-all-suppliers]')?.addEventListener('click', () => updateHash({ loadSuppliers: 'all' }));
+  root.querySelector('[data-show-more]')?.addEventListener('click', () => updateHash({ limit: String(Number(state.limit || 72) + 72) }));
   root.querySelector('[data-reset-library]')?.addEventListener('click', () => { location.hash = '#/library'; });
   root.querySelector('[data-add-manual-lib]')?.addEventListener('click', () => { p.estimateItems.push(createEstimateItem({ name: 'Ручная позиция', category: 'Оборудование', currency: 'RUB', source: 'manual', isManual: true, note: 'добавлено из пустого состояния библиотеки' })); persistProject(); toast('Ручная позиция добавлена'); location.hash = '#/estimate?mode=detailed'; });
-  root.querySelectorAll('[data-add-library]').forEach(btn => btn.addEventListener('click', () => { const item = library.find(i => i.id === btn.dataset.addLibrary); addCatalogItemToProject(p, item, root.querySelector('[data-target-zone]')?.value || ''); persistProject(); toast('Позиция добавлена в смету'); }));
+  root.querySelectorAll('[data-add-library]').forEach(btn => btn.addEventListener('click', () => { const item = library.find(i => i.id === btn.dataset.addLibrary); if (!item) return; addCatalogItemToProject(p, item, root.querySelector('[data-target-zone]')?.value || ''); persistProject(); toast('Позиция добавлена в смету'); }));
   root.querySelectorAll('[data-mark-review]').forEach(btn => btn.addEventListener('click', () => { const item = library.find(i => i.id === btn.dataset.markReview); if (item) item.requiresEngineerReview = true; toast('Позиция отмечена в текущей сессии'); LibraryPage(root); }));
   root.querySelectorAll('[data-add-dependency-fallback]').forEach(btn => btn.addEventListener('click', () => { const dep = resolveMissingDependencies(p).find(item => item.id === btn.dataset.addDependencyFallback); if (!dep) return; p.estimateItems.push(createEstimateItem(createDependencyFallbackItem(dep, dep.zoneId))); persistProject(); toast('Fallback-зависимость добавлена в смету'); LibraryPage(root); }));
 
@@ -161,11 +208,8 @@ function bind(root, p, state, library) {
     let added = 0;
     template.items.forEach(templateItem => {
       const candidate = library.find(item => item.subcategoryId === templateItem.categoryId || item.categoryId === templateItem.categoryId || (item.systemGroups || []).includes(templateItem.categoryId));
-      if (candidate) {
-        addCatalogItemToProject(p, candidate, zone.id, { source: 'installation-template', qty: templateItem.qty || 1, derivedKey: `${zone.id}:${template.id}:${candidate.id}` });
-      } else {
-        p.estimateItems.push(createEstimateItem({ zoneId: zone.id, name: templateItem.fallbackName, category: templateItem.fallbackName, categoryId: templateItem.categoryId, subcategoryId: templateItem.categoryId, unit: 'компл.', qty: templateItem.qty || 1, currency: 'RUB', unitCost: 0, source: 'template-fallback', isManual: false, isDerived: true, derivedKey: `${zone.id}:${template.id}:${templateItem.id}`, priceStatus: 'unknown', requiresPriceRequest: true, requiresEngineerReview: true, note: 'Fallback-позиция: исходная позиция шаблона не найдена в библиотеке.' }));
-      }
+      if (candidate) addCatalogItemToProject(p, candidate, zone.id, { source: 'installation-template', qty: templateItem.qty || 1, derivedKey: `${zone.id}:${template.id}:${candidate.id}` });
+      else p.estimateItems.push(createEstimateItem({ zoneId: zone.id, name: templateItem.fallbackName, category: templateItem.fallbackName, categoryId: templateItem.categoryId, subcategoryId: templateItem.categoryId, unit: 'компл.', qty: templateItem.qty || 1, currency: 'RUB', unitCost: 0, source: 'template-fallback', isManual: false, isDerived: true, derivedKey: `${zone.id}:${template.id}:${templateItem.id}`, priceStatus: 'unknown', requiresPriceRequest: true, requiresEngineerReview: true, note: 'Fallback-позиция: исходная позиция шаблона не найдена в библиотеке.' }));
       added += 1;
     });
     persistProject(); toast(`Шаблон добавлен: ${added} строк`); location.hash = '#/estimate?mode=detailed';
