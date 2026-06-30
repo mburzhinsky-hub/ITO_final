@@ -19,8 +19,9 @@ export function validateProject(project = {}, settingsInput = null) {
 
 export function validatePassport(project = {}, settings = {}) {
   const warnings = [];
+  project.customerName = customerName(project);
   if (!project.name?.trim()) warnings.push(w('passport-name', 'data', 'error', 'Не заполнено название проекта', 'Проекту нужно понятное название для КП и списка проектов.', 'project', project.id, 'Открыть паспорт', 'open-passport'));
-  if (!project.customerName?.trim()) warnings.push(w('passport-customer', 'data', 'warning', 'Не заполнен заказчик', 'КП будет выглядеть неполным без названия заказчика.', 'project', project.id, 'Открыть паспорт', 'open-passport'));
+  if (!customerName(project).trim()) warnings.push(w('passport-customer', 'data', 'warning', 'Не заполнен заказчик', 'КП будет выглядеть неполным без названия заказчика.', 'project', project.id, 'Открыть паспорт', 'open-passport'));
   const vatPct = num(project.passport?.vatPct, settings.defaultVatPct);
   if (vatPct < 0 || vatPct > 100) warnings.push(w('commercial-vat', 'commercial', 'error', 'Некорректный НДС', 'НДС должен быть в диапазоне от 0 до 100%.', 'passport', project.id, 'Исправить НДС', 'open-passport'));
   return warnings;
@@ -73,6 +74,7 @@ export function validateEstimate(project = {}, settings = {}) {
     if (num(item.qty, 0) <= 0) warnings.push(w(`item-qty-${item.id}`, 'estimate', 'error', 'Количество позиции меньше или равно нулю', `Позиция «${item.name}» имеет некорректное количество.`, 'item', item.id, 'Исправить позицию', 'open-estimate'));
     if (num(item.unitCost, 0) < 0) warnings.push(w(`item-cost-${item.id}`, 'estimate', 'error', 'Цена позиции меньше нуля', `Позиция «${item.name}» имеет отрицательную цену.`, 'item', item.id, 'Исправить позицию', 'open-estimate'));
     if (!item.currency) warnings.push(w(`item-currency-${item.id}`, 'currency', 'error', 'Валюта не задана', `У позиции «${item.name}» не указана валюта.`, 'item', item.id, 'Исправить валюту', 'open-estimate'));
+    if (item.currency && !['RUB','USD'].includes(String(item.currency).toUpperCase())) warnings.push(w(`item-currency-unknown-${item.id}`, 'currency', 'warning', 'Неизвестная валюта', `Валюта «${item.currency}» у позиции «${item.name}» будет обработана как RUB.`, 'item', item.id, 'Исправить валюту', 'open-estimate'));
     if (normalizeCurrency(item.currency) === 'USD' && num(settings.usdRate, 0) <= 0) warnings.push(w(`item-rate-${item.id}`, 'currency', 'error', 'Есть валютная позиция, но курс не задан', `Позиция «${item.name}» зависит от курса USD.`, 'item', item.id, 'Открыть настройки', 'open-settings'));
     if (!item.category?.trim()) warnings.push(w(`item-category-${item.id}`, 'estimate', 'warning', 'Позиция без категории', `Позиция «${item.name}» не попадёт в нормальную группировку сметы.`, 'item', item.id, 'Исправить категорию', 'open-estimate'));
     if (item.isManual && !item.note?.trim()) warnings.push(w(`item-manual-note-${item.id}`, 'estimate', 'recommendation', 'Ручная позиция без комментария', `Для ручной позиции «${item.name}» желательно указать основание цены.`, 'item', item.id, 'Добавить комментарий', 'open-estimate'));
@@ -96,6 +98,8 @@ export function validateCommercialSettings(project = {}, settings = {}) {
   if (budget.enabled && budget.status === 'over') warnings.push(w('budget-over', 'budget', 'warning', 'Целевой бюджет превышен', `Текущая цена выше бюджета на ${Math.round(budget.delta).toLocaleString('ru-RU')} ₽ (${budget.deltaPct.toFixed(1)}%).`, 'project', project.id, 'Проверить бюджет', 'open-estimate'));
   return warnings;
 }
+
+function customerName(project = {}) { return String(project.customerName || project.customer || project.passport?.customerName || project.passport?.customer || ''); }
 
 function w(id, type, severity, title, message, entityType, entityId, actionLabel, actionType) {
   return { id, type, severity, title, message, entityType, entityId, actionLabel, actionType };

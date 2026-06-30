@@ -1,7 +1,7 @@
 const routes = new Map();
 export function registerRoute(id, renderer) { routes.set(id, renderer); }
-export function currentRoute() { return ((location.hash || '#/projects').replace('#/','').split('?')[0]) || 'projects'; }
-export function navigate(route) { location.hash = `#/${route}`; }
+export function currentRoute() { const hash = globalThis.location?.hash || globalThis.window?.location?.hash || '#/projects'; return (hash.replace('#/','').split('?')[0]) || 'projects'; }
+export function navigate(route) { if (globalThis.location) globalThis.location.hash = `#/${route}`; else if (globalThis.window?.location) globalThis.window.location.hash = `#/${route}`; }
 export function startRouter(root) {
   const render = () => {
     const route = currentRoute();

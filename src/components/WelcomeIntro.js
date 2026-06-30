@@ -1,8 +1,13 @@
 export function mountWelcomeIntro() {
+  if (typeof document === 'undefined') return;
   const key = 'vizhuIntroSeen';
-  const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-  if (sessionStorage.getItem(key) === '1') return;
-  sessionStorage.setItem(key, '1');
+  const reduceMotion = globalThis.window?.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  try {
+    if (globalThis.sessionStorage?.getItem(key) === '1') return;
+    globalThis.sessionStorage?.setItem(key, '1');
+  } catch {
+    // Welcome-анимация не должна ломать приложение, если sessionStorage недоступен.
+  }
   const overlay = document.createElement('section');
   overlay.className = `welcomeIntro${reduceMotion ? ' reduced' : ''}`;
   overlay.setAttribute('role', 'dialog');
@@ -17,16 +22,16 @@ export function mountWelcomeIntro() {
     </div>`;
   document.body.appendChild(overlay);
   const app = document.getElementById('app');
-  app?.classList.add('appEntering');
+  app?.classList?.add('appEntering');
   const close = () => {
     overlay.classList.add('isLeaving');
-    window.setTimeout(() => {
+    globalThis.window?.setTimeout?.(() => {
       overlay.remove();
-      app?.classList.remove('appEntering');
-      app?.setAttribute('tabindex', '-1');
+      app?.classList?.remove('appEntering');
+      app?.setAttribute?.('tabindex', '-1');
       app?.focus?.({ preventScroll: true });
     }, reduceMotion ? 50 : 420);
   };
   overlay.querySelector('.welcomeSkip')?.addEventListener('click', close);
-  window.setTimeout(close, reduceMotion ? 200 : 2100);
+  globalThis.window?.setTimeout?.(close, reduceMotion ? 200 : 2100);
 }

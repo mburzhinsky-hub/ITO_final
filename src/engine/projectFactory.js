@@ -16,7 +16,7 @@ export function createProject(seed = {}) {
   return {
     id,
     name: seed.name || 'Новый AV-пресейл',
-    customerName: seed.customerName || '',
+    customerName: seed.customerName || seed.customer || seed.passport?.customerName || seed.passport?.customer || '',
     createdAt: seed.createdAt || now,
     updatedAt: seed.updatedAt || now,
     status: seed.status || 'draft',
@@ -34,8 +34,8 @@ export function createProject(seed = {}) {
     proposalOptions: normalizeProposalOptions(seed.proposalOptions || {}),
     settingsOverrides: seed.settingsOverrides || {},
     notes: seed.notes || '',
-    schemaVersion: seed.schemaVersion || 6,
-    appVersion: seed.appVersion || 'stage6-export-proposal',
+    schemaVersion: Math.max(Number(seed.schemaVersion || 0), 7) || 7,
+    appVersion: seed.appVersion || 'stage7-refactor-stabilization',
     proposalNumber: seed.proposalNumber || '',
     managerContact: seed.managerContact || '',
     customerContact: seed.customerContact || ''
@@ -101,12 +101,16 @@ export function createEstimateItem(seed = {}) {
 }
 
 export function normalizeProject(raw) {
+  raw ||= {};
+  if (!raw.customerName && raw.passport) raw.customerName = raw.passport.customerName || raw.passport.customer || raw.customer || '';
   const project = createProject(raw || {});
   project.zones = (raw?.zones || []).map(createZone);
   project.estimateItems = (raw?.estimateItems || raw?.estimate || []).map(createEstimateItem);
   project.acceptedWarnings = raw?.acceptedWarnings || [];
   project.proposalOptions = normalizeProposalOptions(raw?.proposalOptions || project.proposalOptions || {});
   project.passport.targetBudgetIncludesVat = project.passport.targetBudgetIncludesVat ?? DEFAULT_SETTINGS.targetBudgetIncludesVat;
+  project.schemaVersion = Math.max(Number(project.schemaVersion || 0), 7) || 7;
+  project.appVersion = project.appVersion || 'stage7-refactor-stabilization';
   return project;
 }
 

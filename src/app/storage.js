@@ -3,34 +3,66 @@ const INDEX_KEY = 'vizhu.stage1.projects.index';
 const PROJECT_KEY = id => `vizhu.stage1.projects.${id}`;
 const SETTINGS_KEY = 'vizhu.stage1.settings';
 
+function safeStorage() {
+  try {
+    if (typeof localStorage === 'undefined') return null;
+    const probe = '__vizhu_storage_probe__';
+    localStorage.setItem(probe, '1');
+    localStorage.removeItem(probe);
+    return localStorage;
+  } catch {
+    return null;
+  }
+}
+
+function readJson(key, fallback) {
+  const storage = safeStorage();
+  if (!storage) return fallback;
+  try { return JSON.parse(storage.getItem(key) || JSON.stringify(fallback)); } catch { return fallback; }
+}
+
+function writeJson(key, value) {
+  const storage = safeStorage();
+  if (!storage) return value;
+  storage.setItem(key, JSON.stringify(value));
+  return value;
+}
+
 export function listProjects() {
-  const ids = JSON.parse(localStorage.getItem(INDEX_KEY) || '[]');
+  const ids = readJson(INDEX_KEY, []);
   return ids.map(id => readProject(id)).filter(Boolean).sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt)));
 }
 export function readProject(id) {
-  const raw = localStorage.getItem(PROJECT_KEY(id));
+  const storage = safeStorage();
+  if (!storage || !id) return null;
+  const raw = storage.getItem(PROJECT_KEY(id));
   if (!raw) return null;
   try { return normalizeProject(JSON.parse(raw)); } catch { return null; }
 }
 export function saveProject(project) {
-  project.updatedAt = new Date().toISOString();
-  localStorage.setItem(PROJECT_KEY(project.id), JSON.stringify(project));
-  const ids = new Set(JSON.parse(localStorage.getItem(INDEX_KEY) || '[]')); ids.add(project.id);
-  localStorage.setItem(INDEX_KEY, JSON.stringify([...ids]));
-  return project;
+  const normalized = normalizeProject(project || {});
+  normalized.updatedAt = new Date().toISOString();
+  const storage = safeStorage();
+  if (!storage) return normalized;
+  storage.setItem(PROJECT_KEY(normalized.id), JSON.stringify(normalized));
+  const ids = new Set(readJson(INDEX_KEY, [])); ids.add(normalized.id);
+  writeJson(INDEX_KEY, [...ids]);
+  return normalized;
 }
 export function deleteProject(id) {
-  localStorage.removeItem(PROJECT_KEY(id));
-  const ids = JSON.parse(localStorage.getItem(INDEX_KEY) || '[]').filter(x => x !== id);
-  localStorage.setItem(INDEX_KEY, JSON.stringify(ids));
+  const storage = safeStorage();
+  if (!storage) return;
+  storage.removeItem(PROJECT_KEY(id));
+  const ids = readJson(INDEX_KEY, []).filter(x => x !== id);
+  writeJson(INDEX_KEY, ids);
 }
 export function createAndSaveProject(seed = {}) { return saveProject(createProject(seed)); }
 export function duplicateAndSaveProject(project) { return saveProject(duplicateProject(project)); }
-export function exportProject(project) { return JSON.stringify(project, null, 2); }
+export function exportProject(project) { return JSON.stringify(normalizeProject(project), null, 2); }
 export function importProject(jsonText) {
   const parsed = JSON.parse(jsonText);
-  const project = normalizeProject(parsed);
+  const project = normalizeProject(parsed?.project || parsed);
   return saveProject(project);
 }
-export function readSettings() { try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}'); } catch { return {}; } }
-export function saveSettings(settings) { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); return settings; }
+export function readSettings() { return readJson(SETTINGS_KEY, {}); }
+export function saveSettings(settings) { return writeJson(SETTINGS_KEY, settings || {}); }

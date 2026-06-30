@@ -7,8 +7,8 @@ import { validateProject } from '../engine/validation.js';
 import { downloadText } from '../utils/dom.js';
 import { safeFileName, dateStamp } from './exportHtml.js';
 
-export const CURRENT_PROJECT_SCHEMA_VERSION = 6;
-export const APP_VERSION = 'stage6-export-proposal';
+export const CURRENT_PROJECT_SCHEMA_VERSION = 7;
+export const APP_VERSION = 'stage7-refactor-stabilization';
 
 export function exportProjectJson(project) {
   const cleanProject = stripRuntimeProject(project);

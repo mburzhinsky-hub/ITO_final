@@ -10,7 +10,7 @@ import { CITY_TIERS } from '../data/cityTiers.js';
 import { URGENCY } from '../data/urgency.js';
 import { validateProject } from '../engine/validation.js';
 import { calculateProjectTotals } from '../engine/pricing.js';
-import { formatMoney } from '../utils/format.js';
+import { escapeHtml, formatMoney } from '../utils/format.js';
 import { toast } from '../utils/dom.js';
 
 export function PassportPage(root) {
@@ -54,14 +54,14 @@ export function PassportPage(root) {
   </div>`);
   bindLayoutActions(root); bind(root, p, missing);
 }
-function field(key,label,value){return `<label class="field"><span>${label}</span><input data-root-field="${key}" value="${value || ''}"></label>`}
-function opt(items, selected){return items.map(x=>`<option value="${x.id}" ${x.id===selected?'selected':''}>${x.name}</option>`).join('')}
+function field(key,label,value){return `<label class="field"><span>${escapeHtml(label)}</span><input data-root-field="${escapeHtml(key)}" value="${escapeHtml(value || '')}"></label>`}
+function opt(items, selected){return items.map(x=>`<option value="${escapeHtml(x.id)}" ${x.id===selected?'selected':''}>${escapeHtml(x.name)}</option>`).join('')}
 function statusLabel(status){return ({draft:'Черновик',estimate_ready:'Смета готова',has_errors:'Есть ошибки',proposal_ready:'КП готово'}[status] || 'Черновик')}
-function requiredMissing(p){const list=[]; if(!p.name?.trim()) list.push('название проекта'); if(!p.customerName?.trim()) list.push('заказчик'); if(!p.passport?.area) list.push('площадь'); return list;}
-function missingNotice(missing){return missing.length ? `<div class="notice warn"><strong>Не хватает данных</strong><p>${missing.join(', ')}</p></div>` : '<div class="notice ok"><strong>Паспорт заполнен</strong><p>Можно переходить к зонам.</p></div>'}
+function requiredMissing(p){const list=[]; const customer = String(p.customerName || p.customer || p.passport?.customerName || p.passport?.customer || ''); if(!String(p.name || '').trim()) list.push('название проекта'); if(!customer.trim()) list.push('заказчик'); if(!p.passport?.area) list.push('площадь'); return list;}
+function missingNotice(missing){return missing.length ? `<div class="notice warn"><strong>Не хватает данных</strong><p>${missing.map(escapeHtml).join(', ')}</p></div>` : '<div class="notice ok"><strong>Паспорт заполнен</strong><p>Можно переходить к зонам.</p></div>'}
 function bind(root,p,missing){
   const refreshMissing = () => { const currentMissing = requiredMissing(p); const holder = root.querySelector('[data-passport-missing]'); if(holder) holder.innerHTML = missingNotice(currentMissing); return currentMissing; };
-  root.querySelectorAll('[data-root-field]').forEach(el=>el.addEventListener('input',()=>{p[el.dataset.rootField]=el.value; refreshMissing();}));
+  root.querySelectorAll('[data-root-field]').forEach(el=>el.addEventListener('input',()=>{p[el.dataset.rootField]=el.value; if (el.dataset.rootField === 'customerName') p.passport.customerName = el.value; refreshMissing();}));
   root.querySelectorAll('[data-passport-field]').forEach(el=>el.addEventListener('input',()=>{const k=el.dataset.passportField; if(k === 'targetBudgetIncludesVat') p.passport[k] = el.value === 'true'; else p.passport[k]=el.type==='number'?Number(el.value):el.value; refreshMissing();}));
   root.querySelectorAll('[data-override-field]').forEach(el=>el.addEventListener('input',()=>{p.settingsOverrides ||= {}; p.settingsOverrides[el.dataset.overrideField]=el.value === '' ? undefined : Number(el.value);}));
   root.querySelectorAll('[data-labor-field]').forEach(el=>el.addEventListener('input',()=>{p.settingsOverrides ||= {}; p.settingsOverrides.laborRates ||= {}; p.settingsOverrides.laborRates[el.dataset.laborField]=el.value === '' ? undefined : Number(el.value);}));

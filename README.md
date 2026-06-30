@@ -107,3 +107,19 @@ python3 -m http.server 8080
 - `src/styles/print.css`
 
 Подробный отчёт: `STAGE6_EXPORT_PROPOSAL_REPORT.md`.
+
+## Stage 7 QA
+
+Тесты запускаются одной командой:
+
+```bash
+npm test
+```
+
+Альтернативная команда проверки:
+
+```bash
+npm run check
+```
+
+Отчёт по седьмому этапу находится в `STAGE7_REFACTOR_QA_REPORT.md`.
