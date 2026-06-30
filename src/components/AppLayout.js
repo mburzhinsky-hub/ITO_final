@@ -3,28 +3,26 @@ import { getProject, persistProject, setProject } from '../app/state.js';
 import { createAndSaveProject } from '../app/storage.js';
 import { exportProject } from '../export/exportJson.js';
 import { downloadText, toast } from '../utils/dom.js';
-import { TopSummary } from './TopSummary.js';
+import { StepNav } from './StepNav.js';
+import { ProjectSummaryBar } from './ProjectSummaryBar.js';
 
-const userRoutes = [
-  ['projects','Проекты'], ['passport','Паспорт проекта'], ['zones','Зоны'], ['estimate','Смета'], ['check','Проверка'], ['proposal','КП / экспорт']
-];
 const expertRoutes = [['library','Библиотека'], ['settings','Настройки']];
 
 export function AppLayout(contentHtml) {
   const p = getProject();
   return `<div class="appShell">
     <div class="topbar">
-      <section class="brand"><div class="brandMark">V</div><div><h1>AV пресейл-калькулятор ВИЖУ</h1><p>Архитектурный этап: проекты, страницы, модули, localStorage, JSON.</p></div></section>
+      <section class="brand"><div class="brandMark">V</div><div><h1>AV пресейл-калькулятор ВИЖУ</h1><p>Проект → зоны → смета → проверка → КП.</p></div></section>
       <section class="panel topActions">
         ${p ? `<button class="btn ghost" data-action="save-current">Сохранить</button><button class="btn ghost" data-action="export-current">JSON</button>` : ''}
         <button class="btn primary" data-action="new-project">Новый расчёт</button>
       </section>
     </div>
-    ${TopSummary(p)}
+    ${StepNav(p)}
+    ${ProjectSummaryBar(p)}
     <div class="layout">
       <aside class="panel sidebar">
-        <div class="navGroupTitle">Пользовательский сценарий</div>${nav(userRoutes)}
-        <div class="navGroupTitle">Экспертная зона</div>${nav(expertRoutes)}
+        <div class="navGroupTitle">Дополнительно</div>${nav(expertRoutes)}
       </aside>
       <main class="panel content"><div class="page">${contentHtml}</div></main>
     </div>
