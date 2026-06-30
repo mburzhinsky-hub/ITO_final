@@ -3,6 +3,7 @@ import { calculateBudgetStatus } from './budget.js';
 import { normalizeCurrency } from './currency.js';
 import { num } from '../utils/format.js';
 import { getProjectZoneModel, getZoneCategory, getZoneTemplate, canonicalSystemGroups } from '../data/zoneTaxonomy.js';
+import { resolveMissingDependencies } from './dependencyResolver.js';
 
 export function validateProject(project = {}, settingsInput = null) {
   const settings = settingsInput || mergedSettings(project);
@@ -58,7 +59,17 @@ export function validateEstimate(project = {}, settings = {}) {
       if (!covered && zoneItems.length) warnings.push(w(`zone-group-${zone.id}-${group}`, 'engineering', 'recommendation', 'AV-группа не закрыта в смете', `В зоне «${zone.name}» требуется группа «${group}», но в смете по этой зоне нет очевидной позиции этой категории.`, 'zone', zone.id, 'Проверить смету', 'open-estimate'));
     });
   });
+  resolveMissingDependencies(project).slice(0, 40).forEach(dep => {
+    warnings.push(w(`dependency-${dep.id}`, 'engineering', dep.required ? 'warning' : 'recommendation', dep.required ? 'Не закрыта обязательная зависимость' : 'Не закрыта рекомендуемая зависимость', `Позиция «${dep.sourceItemName}» требует: ${dep.fallbackName}. ${dep.reason || ''}`, dep.zoneId ? 'zone' : 'estimate', dep.zoneId || project.id, 'Открыть библиотеку', 'open-estimate'));
+  });
   items.forEach(item => {
+    if (item.priceStatus === 'unknown' || item.requiresPriceRequest) warnings.push(w(`item-price-request-${item.id}`, 'estimate', 'warning', 'Нужно запросить цену', `У позиции «${item.name}» нет подтверждённой цены.`, 'item', item.id, 'Открыть смету', 'open-estimate'));
+    if (item.requiresEngineerReview) warnings.push(w(`item-engineer-${item.id}`, 'engineering', 'recommendation', 'Позиция требует инженерной проверки', `Проверьте применимость и состав для «${item.name}».`, 'item', item.id, 'Открыть смету', 'open-estimate'));
+    if (project.passport?.scenario && item.solutionLevel) {
+      const target = project.passport.scenario === 'base' ? 'standard' : project.passport.scenario;
+      if (target === 'premium' && ['budget'].includes(item.solutionLevel)) warnings.push(w(`item-level-low-${item.id}`, 'engineering', 'recommendation', 'Позиция ниже уровня проекта', `Для premium-сценария позиция «${item.name}» имеет уровень ${item.solutionLevel}.`, 'item', item.id, 'Подобрать альтернативу', 'open-estimate'));
+      if (target === 'budget' && ['premium','expert'].includes(item.solutionLevel)) warnings.push(w(`item-level-high-${item.id}`, 'budget', 'recommendation', 'Позиция выше уровня проекта', `Для budget-сценария позиция «${item.name}» может быть слишком дорогой.`, 'item', item.id, 'Подобрать альтернативу', 'open-estimate'));
+    }
     if (num(item.qty, 0) <= 0) warnings.push(w(`item-qty-${item.id}`, 'estimate', 'error', 'Количество позиции меньше или равно нулю', `Позиция «${item.name}» имеет некорректное количество.`, 'item', item.id, 'Исправить позицию', 'open-estimate'));
     if (num(item.unitCost, 0) < 0) warnings.push(w(`item-cost-${item.id}`, 'estimate', 'error', 'Цена позиции меньше нуля', `Позиция «${item.name}» имеет отрицательную цену.`, 'item', item.id, 'Исправить позицию', 'open-estimate'));
     if (!item.currency) warnings.push(w(`item-currency-${item.id}`, 'currency', 'error', 'Валюта не задана', `У позиции «${item.name}» не указана валюта.`, 'item', item.id, 'Исправить валюту', 'open-estimate'));

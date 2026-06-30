@@ -8,6 +8,7 @@ import { CheckPage } from '../pages/CheckPage.js';
 import { ProposalPage } from '../pages/ProposalPage.js';
 import { LibraryPage } from '../pages/LibraryPage.js';
 import { SettingsPage } from '../pages/SettingsPage.js';
+import { mountWelcomeIntro } from '../components/WelcomeIntro.js';
 
 const root = document.getElementById('app');
 registerRoute('projects', ProjectsPage);
@@ -19,4 +20,5 @@ registerRoute('proposal', ProposalPage);
 registerRoute('library', LibraryPage);
 registerRoute('settings', SettingsPage);
 startRouter(root);
+mountWelcomeIntro();
 subscribe(() => {});

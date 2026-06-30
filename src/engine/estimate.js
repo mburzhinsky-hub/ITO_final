@@ -4,6 +4,8 @@ import { createEstimateItem } from './projectFactory.js';
 import { normalizeCurrency, normalizePriceMode, convertToRub } from './currency.js';
 import { DEFAULT_SETTINGS } from '../data/defaultSettings.js';
 import { getZoneTemplate, canonicalSystemGroups } from '../data/zoneTaxonomy.js';
+import { mapLegacyCategoryToEquipment, rootCategoryName, subcategoryName } from '../data/equipmentCategories.js';
+import { dependenciesForItem, resolveMissingDependencies, createDependencyFallbackItem } from './dependencyResolver.js';
 
 const SOURCE_CATALOG = [...SUPPLIER_PRICE_CATALOG, ...CATALOG];
 
@@ -37,27 +39,81 @@ function compareCatalogItems(a, b) {
 }
 
 export function normalizeCatalogItem(item) {
+  const mapped = mapLegacyCategoryToEquipment(item.category || item.subcategory || '', `${item.name || ''} ${item.brand || ''} ${item.model || ''}`);
   const currency = item.currency || (item.imported ? 'USD' : 'RUB');
   const unitCost = Number(item.unitCost ?? item.price_usd ?? item.priceUsd ?? item.price_rub ?? item.priceRub ?? item.price ?? 0);
   const normalizedCurrency = normalizeCurrency(currency);
-  const priceMode = item.imported || normalizedCurrency === 'USD' ? 'indexed' : 'fixed';
-  return {
+  const priceMode = item.priceMode || (item.imported || normalizedCurrency === 'USD' ? 'indexed' : 'fixed');
+  const solutionLevel = normalizeSolutionLevel(item.solutionLevel || item.scenario || 'standard');
+  const priceStatus = item.priceStatus || (unitCost > 0 ? (item.imported || /ориентиров|примерн|estimated/i.test(item.note || '') ? 'estimated' : 'actual') : 'unknown');
+  const name = item.name || [item.brand, item.model].filter(Boolean).join(' ') || item.description || 'Позиция каталога';
+  const base = {
     id: item.id || `${item.brand || ''}_${item.model || item.name}`.replace(/\W+/g, '_').toLowerCase(),
-    name: item.name || [item.brand, item.model].filter(Boolean).join(' ') || item.description || 'Позиция каталога',
-    brand: item.brand || '', model: item.model || '',
-    category: item.category || item.subcategory || 'Оборудование',
-    unit: item.unit || 'шт.', scenario: item.scenario || 'base',
-    types: item.types || [], note: item.note || item.description || '',
-    supplier: item.supplier || '',
-    supplierPriority: supplierPriority(item),
-    article: item.article || '',
+    name,
+    brand: item.brand || '',
+    model: item.model || '',
+    category: item.category || subcategoryName(mapped.subcategoryId) || rootCategoryName(mapped.categoryId),
+    categoryId: item.categoryId || mapped.categoryId,
+    subcategoryId: item.subcategoryId || mapped.subcategoryId,
+    description: item.description || item.note || '',
+    unit: item.unit || 'шт.',
     currency: normalizedCurrency,
     unitCost,
     price: unitCost,
     priceRub: convertToRub(unitCost, normalizedCurrency, DEFAULT_SETTINGS),
-    priceMode
+    priceMode,
+    priceStatus,
+    priceSource: item.priceSource || item.supplier || (item.imported ? 'market-estimate' : ''),
+    priceDate: item.priceDate || '',
+    solutionLevel,
+    scenario: solutionLevel === 'standard' ? 'base' : solutionLevel,
+    projectTypeIds: item.projectTypeIds || item.types || [],
+    types: item.projectTypeIds || item.types || [],
+    zoneCategoryIds: item.zoneCategoryIds || inferZoneCategories(mapped.categoryId, item.types || []),
+    zoneTemplateIds: item.zoneTemplateIds || [],
+    systemGroups: item.systemGroups || [mapped.categoryId, mapped.subcategoryId].filter(Boolean),
+    dependencies: item.dependencies || [],
+    alternatives: item.alternatives || [],
+    tags: item.tags || [item.category, item.segment, item.supplier, solutionLevel].filter(Boolean),
+    supplier: item.supplier || '',
+    supplierPriority: supplierPriority(item),
+    article: item.article || '',
+    leadTime: item.leadTime || '',
+    warranty: item.warranty || '',
+    isPlaceholder: Boolean(item.isPlaceholder || /placeholder|условн|резерв|tbd/i.test(name)),
+    requiresEngineerReview: Boolean(item.requiresEngineerReview || unitCost <= 0 || /условн|провер|расчет|расчёт/i.test(item.note || '')),
+    requiresPriceRequest: Boolean(item.requiresPriceRequest || unitCost <= 0),
+    note: item.note || item.description || '',
+    imported: Boolean(item.imported)
   };
+  base.dependencies = dependenciesForItem(base).map(dep => dep.id);
+  return base;
 }
+
+function normalizeSolutionLevel(value = 'standard') {
+  const v = String(value || '').toLowerCase();
+  if (v === 'base') return 'standard';
+  if (['budget', 'standard', 'premium', 'expert', 'custom'].includes(v)) return v;
+  return 'standard';
+}
+
+function inferZoneCategories(categoryId, types = []) {
+  const typeSet = new Set(types || []);
+  const result = [];
+  const add = (...ids) => ids.forEach(id => { if (id && !result.includes(id)) result.push(id); });
+  if (categoryId === 'vcs') add('meeting-vcs', 'education', 'corporate-spaces');
+  if (categoryId === 'led' || categoryId === 'display') add('led-large-screens', 'retail-showroom', 'events-conference', 'museum-exposition', 'control-centers');
+  if (categoryId === 'audio') add('meeting-vcs', 'events-conference', 'horeca-hospitality', 'sport-fitness', 'education');
+  if (categoryId === 'interactive' || categoryId === 'content-software') add('museum-exposition', 'content-interactive', 'retail-showroom', 'education');
+  if (categoryId === 'rack-power' || categoryId === 'cable' || categoryId === 'signal') add('infrastructure', 'meeting-vcs', 'events-conference', 'corporate-spaces');
+  if (typeSet.has('museum')) add('museum-exposition');
+  if (typeSet.has('retail')) add('retail-showroom');
+  if (typeSet.has('conference') || typeSet.has('event')) add('events-conference');
+  if (typeSet.has('education')) add('education');
+  if (typeSet.has('control')) add('control-centers');
+  return result;
+}
+
 export const LIBRARY = buildLibrary(SOURCE_CATALOG);
 
 export function recommendedCategoriesForZone(zone = {}) {
@@ -85,9 +141,36 @@ export function recommendedCategoriesForZone(zone = {}) {
 }
 
 function itemMatchesContext(item, zone, project, scenario) {
-  const types = item.types || [];
-  return (!types.length || types.includes(project.passport?.projectType) || types.includes(zone.type) || types.includes(zone.purpose));
+  const projectType = project.passport?.projectType;
+  const projectTypes = item.projectTypeIds || item.types || [];
+  const zoneCategories = item.zoneCategoryIds || [];
+  const templates = item.zoneTemplateIds || [];
+  const contextOk = (!projectTypes.length || projectTypes.includes(projectType) || projectTypes.includes(zone.type) || projectTypes.includes(zone.purpose));
+  const zoneOk = (!zoneCategories.length || zoneCategories.includes(zone.categoryId));
+  const templateOk = (!templates.length || templates.includes(zone.templateId));
+  return contextOk && zoneOk && templateOk && levelCompatible(item, scenario);
 }
+
+function levelCompatible(item, scenario = 'base') {
+  const target = normalizeSolutionLevel(scenario);
+  const level = item.solutionLevel || normalizeSolutionLevel(item.scenario);
+  if (target === 'budget') return ['budget', 'standard'].includes(level);
+  if (target === 'premium') return ['premium', 'standard', 'expert'].includes(level);
+  if (target === 'expert') return ['expert', 'premium', 'custom', 'standard'].includes(level);
+  return ['standard', 'budget', 'premium'].includes(level);
+}
+
+function levelDistance(item, scenario = 'base') {
+  const order = ['budget', 'standard', 'premium', 'expert', 'custom'];
+  const target = order.indexOf(normalizeSolutionLevel(scenario));
+  const level = order.indexOf(item.solutionLevel || normalizeSolutionLevel(item.scenario));
+  return Math.abs((target < 0 ? 1 : target) - (level < 0 ? 1 : level));
+}
+
+function selectBestCandidate(candidates, scenario) {
+  return [...candidates].sort((a, b) => levelDistance(a, scenario) - levelDistance(b, scenario) || supplierPriority(b) - supplierPriority(a) || Number(b.unitCost || 0) - Number(a.unitCost || 0))[0];
+}
+
 
 function pickCatalogItemsForZone(zone, project, scenario, limit = 12) {
   const template = getZoneTemplate(zone.templateId);
@@ -99,8 +182,8 @@ function pickCatalogItemsForZone(zone, project, scenario, limit = 12) {
   const seen = new Set();
 
   const pickByCategory = (category, qty = 1) => {
-    const candidate = LIBRARY.find(item => item.category === category && ['budget', scenario, 'base', 'premium'].includes(item.scenario) && itemMatchesContext(item, zone, project, scenario) && !seen.has(item.id))
-      || LIBRARY.find(item => item.category === category && ['budget', scenario, 'base', 'premium'].includes(item.scenario) && !seen.has(item.id));
+    const candidate = selectBestCandidate(LIBRARY.filter(item => (item.category === category || item.systemGroups?.includes(category) || item.categoryId === category || item.subcategoryId === category) && itemMatchesContext(item, zone, project, scenario) && !seen.has(item.id)), scenario)
+      || selectBestCandidate(LIBRARY.filter(item => (item.category === category || item.systemGroups?.includes(category) || item.categoryId === category || item.subcategoryId === category) && !seen.has(item.id)), scenario);
     if (candidate && picked.length < limit) {
       picked.push({ ...candidate, recommendedQty: qty });
       seen.add(candidate.id);
@@ -112,12 +195,12 @@ function pickCatalogItemsForZone(zone, project, scenario, limit = 12) {
 
   if (picked.length < Math.min(limit, categories.length)) {
     categories.forEach(category => {
-      const candidate = LIBRARY.find(item => String(item.category || '').toLowerCase().includes(String(category).toLowerCase().split(' ')[0]) && ['budget', scenario, 'base', 'premium'].includes(item.scenario) && !seen.has(item.id));
+      const candidate = selectBestCandidate(LIBRARY.filter(item => String(item.category || '').toLowerCase().includes(String(category).toLowerCase().split(' ')[0]) && levelCompatible(item, scenario) && !seen.has(item.id)), scenario);
       if (candidate && picked.length < limit) { picked.push({ ...candidate, recommendedQty: 1 }); seen.add(candidate.id); }
     });
   }
   if (picked.length < limit) {
-    LIBRARY.filter(item => ['budget', scenario, 'base'].includes(item.scenario) && itemMatchesContext(item, zone, project, scenario) && !seen.has(item.id))
+    LIBRARY.filter(item => itemMatchesContext(item, zone, project, scenario) && !seen.has(item.id))
       .slice(0, limit - picked.length).forEach(item => { picked.push({ ...item, recommendedQty: 1 }); seen.add(item.id); });
   }
   return picked;
@@ -154,6 +237,16 @@ export function addCatalogItemToProject(project, catalogItem, zoneId = '', optio
     zoneId,
     name: catalogItem.name,
     category: catalogItem.category,
+    categoryId: catalogItem.categoryId || '',
+    subcategoryId: catalogItem.subcategoryId || '',
+    catalogItemId: catalogItem.id || '',
+    sourceCatalogItemId: catalogItem.id || '',
+    solutionLevel: catalogItem.solutionLevel || 'standard',
+    priceStatus: catalogItem.priceStatus || 'actual',
+    requiresPriceRequest: Boolean(catalogItem.requiresPriceRequest),
+    requiresEngineerReview: Boolean(catalogItem.requiresEngineerReview),
+    systemGroups: catalogItem.systemGroups || [],
+    dependencies: catalogItem.dependencies || [],
     unit: catalogItem.unit,
     qty: options.qty ?? 1,
     currency: catalogItem.currency || 'RUB',
@@ -163,10 +256,29 @@ export function addCatalogItemToProject(project, catalogItem, zoneId = '', optio
     isManual: false,
     isDerived: Boolean(options.isDerived),
     derivedKey: options.derivedKey || '',
-    note: catalogItem.note
+    note: [catalogItem.note, catalogItem.priceStatus === 'unknown' ? 'Нужно запросить цену.' : '', catalogItem.requiresEngineerReview ? 'Требуется инженерная проверка.' : ''].filter(Boolean).join(' ')
   });
   project.estimateItems.push(item);
   return item;
+}
+
+
+function addPremiumSupportItems(project, existingKeys) {
+  let added = 0;
+  const rows = [
+    ['service-spare', 'Сервисный запас premium', 'Логистика и сервис', 'Сервисный запас и резерв критичных компонентов'],
+    ['premium-pnr', 'Расширенная ПНР premium', 'Работы', 'Расширенное тестирование сценариев, ВКС, управления и отказов'],
+    ['premium-docs', 'Исполнительная документация premium', 'Работы', 'Расширенная документация, маркировка и регламент эксплуатации'],
+    ['premium-control', 'Проверка сценариев управления', 'Управление', 'Проверка пользовательских сценариев и правок интерфейса']
+  ];
+  rows.forEach(([key, name, category, note]) => {
+    const derivedKey = `project:premium:${key}`;
+    if (existingKeys.has(derivedKey)) return;
+    project.estimateItems.push(createEstimateItem({ name, category, categoryId: key.includes('service') ? 'logistics-service' : key.includes('control') ? 'control' : 'works', unit: 'компл.', qty: 1, currency: 'RUB', unitCost: 0, priceMode: 'fixed', source: 'premium-policy', isDerived: true, derivedKey, priceStatus: 'unknown', requiresPriceRequest: true, requiresEngineerReview: true, note }));
+    existingKeys.add(derivedKey);
+    added += 1;
+  });
+  return added;
 }
 
 export function generateStarterEstimate(project, options = {}) {
@@ -216,6 +328,12 @@ export function generateEstimateFromZones(project, options = {}) {
       report.added += 1;
     });
   });
+  if (normalizeSolutionLevel(scenario) === 'premium') {
+    report.added += addPremiumSupportItems(project, existingKeys);
+  }
+  const missingDependencies = resolveMissingDependencies(project, { onlyRequired: true }).slice(0, 20);
+  report.missingDependencies = missingDependencies;
+  missingDependencies.forEach(dep => report.warnings.push(`Не закрыта зависимость: ${dep.sourceItemName} → ${dep.fallbackName}.`));
   project.estimateItems = deduplicateEstimateItems(project.estimateItems);
   if (!report.added && !report.warnings.length) report.warnings.push('Новых строк не добавлено: расчётные позиции уже существуют.');
   return report;
