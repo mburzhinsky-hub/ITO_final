@@ -14,7 +14,12 @@ import { catalogQualitySummary } from '../engine/catalogValidation.js';
 import { resolveMissingDependencies, createDependencyFallbackItem } from '../engine/dependencyResolver.js';
 import { replacementImpact } from '../engine/alternativeResolver.js';
 import { loadSuppliersMeta, loadSupplierById, loadSupplierCatalog, getLoadedSupplierLibrary, getSupplierCatalogStatus } from '../data/suppliers/loadSupplierCatalog.js';
-import { classifyCatalogScope, catalogScopeLabel, visibleScopesForMode } from '../engine/catalogRelevance.js';
+import { classifySupplierItem, classifyCatalogScope, catalogScopeLabel, visibleScopesForMode } from '../engine/catalogRelevance.js';
+import { CatalogQualityFilters } from '../components/CatalogQualityFilters.js';
+import { CatalogQualityReport } from '../components/CatalogQualityReport.js';
+import { buildCatalogQualityReport, catalogQualityReportToCsv } from '../engine/catalogQualityReport.js';
+import { saveCatalogRelevanceOverride } from '../storage/catalogRelevanceOverrides.js';
+import { canUseItemInAutoEstimate } from '../engine/autoEstimateEligibility.js';
 
 let supplierMeta = null;
 let supplierMetaPromise = null;
@@ -57,6 +62,7 @@ export function LibraryPage(root) {
 
   const library = getLoadedSupplierLibrary(LIBRARY);
   const quality = catalogQualitySummary(library);
+  const relevanceReport = buildCatalogQualityReport(library);
   const filteredItems = filterLibrary(library, state);
   const items = filteredItems.slice(0, Number(state.limit || 72));
   const templates = filterTemplates(INSTALLATION_TEMPLATES, state).slice(0, 30);
@@ -71,7 +77,7 @@ export function LibraryPage(root) {
     <div class="libraryTabs"><a class="btn ${tab === 'equipment' ? 'primary' : 'ghost'} small" href="#/library?tab=equipment">Оборудование</a><a class="btn ${tab === 'templates' ? 'primary' : 'ghost'} small" href="#/library?tab=templates">Шаблоны инсталляций</a><a class="btn ${tab === 'quality' ? 'primary' : 'ghost'} small" href="#/library?tab=quality">Качество данных</a></div>
     ${tab === 'equipment' ? equipmentTab(p, settings, state, items, deps, library, filteredItems.length) : ''}
     ${tab === 'templates' ? templatesTab(state, templates) : ''}
-    ${tab === 'quality' ? qualityTab(quality, deps) : ''}`);
+    ${tab === 'quality' ? qualityTab(quality, deps, relevanceReport) : ''}`);
   bindLayoutActions(root); bind(root, p, state, library);
 }
 
@@ -98,8 +104,8 @@ function readState(q) {
 
 function equipmentTab(project, settings, state, items, deps, library, total) {
   const shown = Math.min(total, Number(state.limit || 72));
-  return `${LibraryFilters({ ...state, zones: project.zones || [], suppliers: supplierMeta?.suppliers || [] })}
-    <div class="notice"><strong>Показано ${shown} из ${total}</strong><p>Каталог не рендерит десятки тысяч карточек сразу. Для supplier-позиций по умолчанию видны AV-ядро, AV-инфраструктура и работы/услуги.</p>${total > shown ? `<div class="actions"><button class="btn ghost small" data-show-more>Показать ещё</button></div>` : ''}</div>
+  return `${CatalogQualityFilters({ scope: state.scope, items: library })}${LibraryFilters({ ...state, zones: project.zones || [], suppliers: supplierMeta?.suppliers || [] })}
+    <div class="notice"><strong>Показано ${shown} из ${total}</strong><p>Каталог не рендерит десятки тысяч карточек сразу. Для supplier-позиций по умолчанию видны AV-оборудование, AV-инфраструктура и работы/услуги.</p>${total > shown ? `<div class="actions"><button class="btn ghost small" data-show-more>Показать ещё</button></div>` : ''}</div>
     ${deps.length ? `<div class="notice warn"><strong>В проекте есть незакрытые зависимости: ${deps.length}</strong><p>Откройте проверку или добавьте fallback-позиции вручную.</p><div class="actions">${deps.slice(0, 4).map(dep => `<button class="btn ghost small" data-add-dependency-fallback="${dep.id}">${dep.fallbackName}</button>`).join('')}<a class="btn ghost small" href="#/check">Проверка</a></div></div>` : ''}
     <div class="separator"></div>${items.length ? `<div class="libraryGrid">${items.map(item => EquipmentCard(item, settings, library)).join('')}</div>` : EmptyState({ title: 'Ничего не найдено', text: 'Сбросьте фильтры, выберите поставщика или загрузите полный прайс.', actions: '<button class="btn ghost" data-reset-library>Сбросить фильтры</button><button class="btn primary" data-add-manual-lib>Добавить ручную позицию</button>' })}`;
 }
@@ -119,8 +125,8 @@ function templatesTab(state, templates) {
   return `${LibraryFilters({ ...state, zones: [], suppliers: supplierMeta?.suppliers || [] })}<div class="separator"></div>${InstallationTemplateList(templates)}`;
 }
 
-function qualityTab(quality, deps) {
-  return `<div class="grid cols3"><div class="card"><div class="muted">Всего позиций</div><div class="valueBig">${quality.totalItems}</div></div><div class="card"><div class="muted">Ошибки</div><div class="valueBig">${quality.errors}</div></div><div class="card"><div class="muted">Предупреждения</div><div class="valueBig">${quality.warnings}</div></div></div>
+function qualityTab(quality, deps, relevanceReport) {
+  return `${CatalogQualityReport(relevanceReport)}<div class="separator"></div><div class="grid cols3"><div class="card"><div class="muted">Всего позиций</div><div class="valueBig">${quality.totalItems}</div></div><div class="card"><div class="muted">Ошибки</div><div class="valueBig">${quality.errors}</div></div><div class="card"><div class="muted">Предупреждения</div><div class="valueBig">${quality.warnings}</div></div></div>
   <div class="separator"></div><div class="grid cols2"><section class="card"><h3>Проверка каталога</h3><div class="miniList">${quality.sample.length ? quality.sample.map(issue => `<div class="miniListItem"><span class="badge ${issue.severity === 'error' ? 'danger' : 'warn'}">${escapeHtml(issue.issueType)}</span><strong>${escapeHtml(issue.itemId)}</strong><small>${escapeHtml(`${issue.message} ${issue.suggestedAction}`)}</small></div>`).join('') : '<div class="muted">Критичных проблем в нормализованной библиотеке не найдено.</div>'}</div></section><section class="card"><h3>Зависимости проекта</h3><div class="miniList">${deps.length ? deps.map(dep => `<div class="miniListItem"><span class="badge ${dep.required ? 'warn' : ''}">${escapeHtml(dep.dependencyType)}</span><strong>${escapeHtml(`${dep.sourceItemName} → ${dep.fallbackName}`)}</strong><small>${escapeHtml(dep.reason)}</small></div>`).join('') : '<div class="muted">Незакрытых зависимостей в текущей смете нет.</div>'}</div></section></div>`;
 }
 
@@ -128,8 +134,9 @@ function filterLibrary(library, state) {
   const searchTerms = String(state.search || '').toLowerCase().replace(/ё/g, 'е').split(/\s+/).filter(Boolean);
   const visibleScopes = new Set(visibleScopesForMode(state.scope));
   return library.filter(item => {
-    const scope = classifyCatalogScope(item);
-    if (item.supplier && !visibleScopes.has(scope)) return false;
+    const classified = classifySupplierItem(item);
+    const scope = classified.relevance;
+    if ((item.supplier || item.supplierId) && !visibleScopes.has(scope)) return false;
     if (state.supplier !== 'all' && item.supplierId !== state.supplier && item.supplier !== state.supplier) return false;
     const haystack = `${item.name} ${item.brand} ${item.model} ${item.article || ''} ${item.category} ${item.supplier || ''} ${(item.tags || []).join(' ')}`.toLowerCase().replace(/ё/g, 'е');
     if (searchTerms.length && !searchTerms.every(term => haystack.includes(term))) return false;
@@ -140,8 +147,8 @@ function filterLibrary(library, state) {
     if (state.price !== 'all' && item.priceStatus !== state.price) return false;
     if (state.projectType !== 'all' && (item.projectTypeIds || item.types || []).length && !(item.projectTypeIds || item.types || []).includes(state.projectType)) return false;
     if (state.zoneCategory !== 'all' && (item.zoneCategoryIds || []).length && !item.zoneCategoryIds.includes(state.zoneCategory)) return false;
-    if (state.review === 'yes' && !item.requiresEngineerReview) return false;
-    if (state.review === 'no' && item.requiresEngineerReview) return false;
+    if (state.review === 'yes' && !(item.requiresEngineerReview || classified.requiresCatalogReview)) return false;
+    if (state.review === 'no' && (item.requiresEngineerReview || classified.requiresCatalogReview)) return false;
     return true;
   });
 }
@@ -178,6 +185,17 @@ function ensureTemplateZone(project, template) {
   return zone;
 }
 
+
+function downloadBlob(blob, filename) {
+  if (typeof URL === 'undefined' || typeof document === 'undefined') return;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function bind(root, p, state, library) {
   let searchTimer = null;
   const updateHash = (patch = {}) => {
@@ -199,7 +217,14 @@ function bind(root, p, state, library) {
   root.querySelector('[data-reset-library]')?.addEventListener('click', () => { location.hash = '#/library'; });
   root.querySelector('[data-add-manual-lib]')?.addEventListener('click', () => { p.estimateItems.push(createEstimateItem({ name: 'Ручная позиция', category: 'Оборудование', currency: 'RUB', source: 'manual', isManual: true, note: 'добавлено из пустого состояния библиотеки' })); persistProject(); toast('Ручная позиция добавлена'); location.hash = '#/estimate?mode=detailed'; });
   root.querySelectorAll('[data-add-library]').forEach(btn => btn.addEventListener('click', () => { const item = library.find(i => i.id === btn.dataset.addLibrary); if (!item) return; addCatalogItemToProject(p, item, root.querySelector('[data-target-zone]')?.value || ''); persistProject(); toast('Позиция добавлена в смету'); }));
-  root.querySelectorAll('[data-mark-review]').forEach(btn => btn.addEventListener('click', () => { const item = library.find(i => i.id === btn.dataset.markReview); if (item) item.requiresEngineerReview = true; toast('Позиция отмечена в текущей сессии'); LibraryPage(root); }));
+  root.querySelectorAll('[data-mark-review]').forEach(btn => btn.addEventListener('click', () => { const item = library.find(i => i.id === btn.dataset.markReview); if (!item) return; saveCatalogRelevanceOverride(item, { relevance: 'questionable', hiddenByDefault: true, reason: 'Ручная пометка: требуется проверка' }); toast('Позиция помечена как спорная'); LibraryPage(root); }));
+  root.querySelectorAll('[data-mark-av]').forEach(btn => btn.addEventListener('click', () => { const item = library.find(i => i.id === btn.dataset.markAv); if (!item) return; saveCatalogRelevanceOverride(item, { relevance: 'av_core', hiddenByDefault: false, reason: 'Ручная пометка: AV-релевантное' }); toast('Позиция помечена как AV'); LibraryPage(root); }));
+  root.querySelectorAll('[data-mark-infra]').forEach(btn => btn.addEventListener('click', () => { const item = library.find(i => i.id === btn.dataset.markInfra); if (!item) return; saveCatalogRelevanceOverride(item, { relevance: 'av_infrastructure', hiddenByDefault: false, reason: 'Ручная пометка: инфраструктура' }); toast('Позиция помечена как инфраструктура'); LibraryPage(root); }));
+  root.querySelectorAll('[data-mark-it]').forEach(btn => btn.addEventListener('click', () => { const item = library.find(i => i.id === btn.dataset.markIt); if (!item) return; saveCatalogRelevanceOverride(item, { relevance: 'it_related', hiddenByDefault: true, reason: 'Ручная пометка: IT' }); toast('Позиция помечена как IT'); LibraryPage(root); }));
+  root.querySelectorAll('[data-hide-library]').forEach(btn => btn.addEventListener('click', () => { const item = library.find(i => i.id === btn.dataset.hideLibrary); if (!item) return; saveCatalogRelevanceOverride(item, { relevance: 'hidden', hiddenByDefault: true, approvedForAutoEstimate: false, reason: 'Ручная пометка: скрыто по умолчанию' }); toast('Позиция скрыта по умолчанию'); LibraryPage(root); }));
+  root.querySelectorAll('[data-toggle-auto]').forEach(btn => btn.addEventListener('click', () => { const item = library.find(i => i.id === btn.dataset.toggleAuto); if (!item) return; saveCatalogRelevanceOverride(item, { relevance: item.relevance || 'it_related', hiddenByDefault: item.hiddenByDefault, approvedForAutoEstimate: !item.approvedForAutoEstimate, reason: !item.approvedForAutoEstimate ? 'Ручное разрешение для автосметы' : 'Ручной запрет для автосметы' }); toast(!item.approvedForAutoEstimate ? 'Разрешено для автосметы' : 'Запрещено для автосметы'); LibraryPage(root); }));
+  root.querySelector('[data-export-quality-json]')?.addEventListener('click', () => { const blob = new Blob([JSON.stringify(buildCatalogQualityReport(library), null, 2)], { type: 'application/json' }); downloadBlob(blob, 'catalog-quality-report.json'); });
+  root.querySelector('[data-export-quality-csv]')?.addEventListener('click', () => { const blob = new Blob([catalogQualityReportToCsv(buildCatalogQualityReport(library))], { type: 'text/csv;charset=utf-8' }); downloadBlob(blob, 'catalog-quality-report.csv'); });
   root.querySelectorAll('[data-add-dependency-fallback]').forEach(btn => btn.addEventListener('click', () => { const dep = resolveMissingDependencies(p).find(item => item.id === btn.dataset.addDependencyFallback); if (!dep) return; p.estimateItems.push(createEstimateItem(createDependencyFallbackItem(dep, dep.zoneId))); persistProject(); toast('Fallback-зависимость добавлена в смету'); LibraryPage(root); }));
 
   root.querySelectorAll('[data-apply-template]').forEach(btn => btn.addEventListener('click', () => {
@@ -208,7 +233,7 @@ function bind(root, p, state, library) {
     const zone = ensureTemplateZone(p, template);
     let added = 0;
     template.items.forEach(templateItem => {
-      const candidate = library.find(item => item.subcategoryId === templateItem.categoryId || item.categoryId === templateItem.categoryId || (item.systemGroups || []).includes(templateItem.categoryId));
+      const candidate = library.find(item => (item.subcategoryId === templateItem.categoryId || item.categoryId === templateItem.categoryId || (item.systemGroups || []).includes(templateItem.categoryId)) && canUseItemInAutoEstimate(item, { zone, template, requiredCategory: templateItem.categoryId, source: 'installation-template' }).allowed);
       if (candidate) addCatalogItemToProject(p, candidate, zone.id, { source: 'installation-template', qty: templateItem.qty || 1, derivedKey: `${zone.id}:${template.id}:${candidate.id}` });
       else p.estimateItems.push(createEstimateItem({ zoneId: zone.id, name: templateItem.fallbackName, category: templateItem.fallbackName, categoryId: templateItem.categoryId, subcategoryId: templateItem.categoryId, unit: 'компл.', qty: templateItem.qty || 1, currency: 'RUB', unitCost: 0, source: 'template-fallback', isManual: false, isDerived: true, derivedKey: `${zone.id}:${template.id}:${templateItem.id}`, priceStatus: 'unknown', requiresPriceRequest: true, requiresEngineerReview: true, note: 'Fallback-позиция: исходная позиция шаблона не найдена в библиотеке.' }));
       added += 1;

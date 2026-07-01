@@ -5,6 +5,8 @@ import { DEFAULT_SETTINGS } from '../data/defaultSettings.js';
 import { getZoneTemplate, canonicalSystemGroups } from '../data/zoneTaxonomy.js';
 import { mapLegacyCategoryToEquipment, rootCategoryName, subcategoryName } from '../data/equipmentCategories.js';
 import { dependenciesForItem, resolveMissingDependencies, createDependencyFallbackItem } from './dependencyResolver.js';
+import { classifySupplierItem } from './catalogRelevance.js';
+import { canUseItemInAutoEstimate, filterAutoEstimateCandidates } from './autoEstimateEligibility.js';
 
 const SOURCE_CATALOG = CATALOG;
 
@@ -78,6 +80,11 @@ export function normalizeCatalogItem(item) {
     supplierId: item.supplierId || '',
     catalogScope: item.catalogScope || item.relevance || '',
     relevance: item.relevance || item.catalogScope || '',
+    relevanceScore: item.relevanceScore,
+    relevanceReason: item.relevanceReason || '',
+    requiresCatalogReview: Boolean(item.requiresCatalogReview),
+    hiddenByDefault: Boolean(item.hiddenByDefault),
+    approvedForAutoEstimate: Boolean(item.approvedForAutoEstimate),
     supplierPriority: supplierPriority(item),
     article: item.article || '',
     leadTime: item.leadTime || '',
@@ -89,7 +96,7 @@ export function normalizeCatalogItem(item) {
     imported: Boolean(item.imported)
   };
   base.dependencies = dependenciesForItem(base).map(dep => dep.id);
-  return base;
+  return classifySupplierItem(base);
 }
 
 function normalizeSolutionLevel(value = 'standard') {
@@ -176,6 +183,7 @@ function selectBestCandidate(candidates, scenario) {
 
 function pickCatalogItemsForZone(zone, project, scenario, limit = 12) {
   const template = getZoneTemplate(zone.templateId);
+  const context = { zone, project, template, source: 'auto-estimate' };
   const recommendedItems = (zone.recommendedItems && zone.recommendedItems.length ? zone.recommendedItems : template?.recommendedItems || [])
     .map(item => ({ ...item, category: canonicalSystemGroups([item.category || item.group])[0] }))
     .sort((a, b) => (a.priority || 999) - (b.priority || 999));
@@ -183,9 +191,19 @@ function pickCatalogItemsForZone(zone, project, scenario, limit = 12) {
   const picked = [];
   const seen = new Set();
 
+  const autoCandidates = (items, requiredCategory = '') => filterAutoEstimateCandidates(items, { ...context, requiredCategory });
+
   const pickByCategory = (category, qty = 1) => {
-    const candidate = selectBestCandidate(LIBRARY.filter(item => (item.category === category || item.systemGroups?.includes(category) || item.categoryId === category || item.subcategoryId === category) && itemMatchesContext(item, zone, project, scenario) && !seen.has(item.id)), scenario)
-      || selectBestCandidate(LIBRARY.filter(item => (item.category === category || item.systemGroups?.includes(category) || item.categoryId === category || item.subcategoryId === category) && !seen.has(item.id)), scenario);
+    const strictPool = autoCandidates(LIBRARY.filter(item =>
+      (item.category === category || item.systemGroups?.includes(category) || item.categoryId === category || item.subcategoryId === category)
+      && itemMatchesContext(item, zone, project, scenario)
+      && !seen.has(item.id)
+    ), category);
+    const fallbackPool = autoCandidates(LIBRARY.filter(item =>
+      (item.category === category || item.systemGroups?.includes(category) || item.categoryId === category || item.subcategoryId === category)
+      && !seen.has(item.id)
+    ), category);
+    const candidate = selectBestCandidate(strictPool, scenario) || selectBestCandidate(fallbackPool, scenario);
     if (candidate && picked.length < limit) {
       picked.push({ ...candidate, recommendedQty: qty });
       seen.add(candidate.id);
@@ -197,12 +215,13 @@ function pickCatalogItemsForZone(zone, project, scenario, limit = 12) {
 
   if (picked.length < Math.min(limit, categories.length)) {
     categories.forEach(category => {
-      const candidate = selectBestCandidate(LIBRARY.filter(item => String(item.category || '').toLowerCase().includes(String(category).toLowerCase().split(' ')[0]) && levelCompatible(item, scenario) && !seen.has(item.id)), scenario);
+      const pool = autoCandidates(LIBRARY.filter(item => String(item.category || '').toLowerCase().includes(String(category).toLowerCase().split(' ')[0]) && levelCompatible(item, scenario) && !seen.has(item.id)), category);
+      const candidate = selectBestCandidate(pool, scenario);
       if (candidate && picked.length < limit) { picked.push({ ...candidate, recommendedQty: 1 }); seen.add(candidate.id); }
     });
   }
   if (picked.length < limit) {
-    LIBRARY.filter(item => itemMatchesContext(item, zone, project, scenario) && !seen.has(item.id))
+    autoCandidates(LIBRARY.filter(item => itemMatchesContext(item, zone, project, scenario) && !seen.has(item.id)))
       .slice(0, limit - picked.length).forEach(item => { picked.push({ ...item, recommendedQty: 1 }); seen.add(item.id); });
   }
   return picked;
@@ -246,7 +265,12 @@ export function addCatalogItemToProject(project, catalogItem, zoneId = '', optio
     solutionLevel: catalogItem.solutionLevel || 'standard',
     priceStatus: catalogItem.priceStatus || 'actual',
     requiresPriceRequest: Boolean(catalogItem.requiresPriceRequest),
-    requiresEngineerReview: Boolean(catalogItem.requiresEngineerReview),
+    requiresEngineerReview: Boolean(catalogItem.requiresEngineerReview || catalogItem.requiresCatalogReview),
+    relevance: catalogItem.relevance || catalogItem.catalogScope || '',
+    relevanceScore: catalogItem.relevanceScore,
+    relevanceReason: catalogItem.relevanceReason || '',
+    requiresCatalogReview: Boolean(catalogItem.requiresCatalogReview),
+    approvedForAutoEstimate: Boolean(catalogItem.approvedForAutoEstimate),
     systemGroups: catalogItem.systemGroups || [],
     dependencies: catalogItem.dependencies || [],
     unit: catalogItem.unit,
@@ -317,7 +341,8 @@ export function generateEstimateFromZones(project, options = {}) {
     }
     const matching = pickCatalogItemsForZone(zone, project, scenario, 12);
     if (!matching.length) {
-      report.skippedZones.push({ id: zone.id, name: zone.name, reason: 'Нет подходящих позиций каталога' });
+      report.skippedZones.push({ id: zone.id, name: zone.name, reason: 'Нет подходящих AV-релевантных позиций каталога' });
+      report.warnings.push(`Для зоны «${zone.name}» не найдены позиции, прошедшие фильтр релевантности. Используйте curated fallback или добавьте позицию вручную.`);
       return;
     }
     report.processedZones.push({ id: zone.id, name: zone.name, count: matching.length, categoryId: zone.categoryId, templateId: zone.templateId });
