@@ -42,6 +42,7 @@ export function validateZones(project = {}) {
     if (!zone.templateId) warnings.push(w(`zone-template-${zone.id}`, 'zones', 'recommendation', 'У зоны нет шаблона', `Зона «${zone.name || 'без названия'}» добавлена вручную. Лучше использовать шаблон, чтобы подтянуть AV-группы и зависимости.`, 'zone', zone.id, 'Выбрать шаблон', 'open-zone'));
     if (zone.categoryId && !model.allowedZoneCategoryIds.includes(zone.categoryId)) warnings.push(w(`zone-nontypical-${zone.id}`, 'zones', 'recommendation', 'Нетиповая зона для типа проекта', `«${zone.name || 'Зона'}» из категории «${category?.name || zone.categoryId}» не является типовой для выбранного типа проекта, но может быть оставлена вручную.`, 'zone', zone.id, 'Проверить зоны', 'open-zone'));
     if (template?.requiresEngineerReview || zone.requiresEngineerReview) warnings.push(w(`zone-engineer-${zone.id}`, 'engineering', 'warning', 'Нужна инженерная проверка зоны', `Для зоны «${zone.name || template?.name || 'без названия'}» проверьте крепления, питание, трассы, коммутацию и сценарии управления.`, 'zone', zone.id, 'Открыть зону', 'open-zone'));
+    (zone.catalogSelectionWarnings || []).forEach((role, index) => warnings.push(w(`zone-catalog-missing-${zone.id}-${index}`, 'catalog', 'warning', 'Не найдена позиция для роли шаблона', `В зоне «${zone.name || 'без названия'}» не закрыта роль «${role.role || role.category || 'оборудование'}»: ${role.reason || 'нет supplier-позиции и fallback'}.`, 'zone', zone.id, 'Открыть зоны', 'open-zone')));
   });
   return warnings;
 }

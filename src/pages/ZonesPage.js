@@ -31,7 +31,7 @@ export function ZonesPage(root) {
     <div class="actions"><button class="btn ${categoryFilter === 'all' ? 'primary' : 'ghost'} small" data-category-filter="all">Все релевантные</button><button class="btn ${showAll ? 'warn' : 'ghost'} small" data-toggle-all>${showAll ? 'Скрыть нетиповые категории' : 'Показать все категории'}</button></div>
   </section>
 
-  ${p.zones.length ? `<div class="grid zoneGrid">${p.zones.map(ZoneCard).join('')}</div>` : EmptyState({ title: 'Зоны ещё не добавлены', text: 'Добавьте default-набор для выбранного типа проекта или выберите конкретные шаблоны ниже.', actions: '<button class="btn primary" data-add-typical>Добавить типовые зоны</button><button class="btn ghost" data-add-zone>Добавить вручную</button>' })}
+  ${p.zones.length ? `<div class="grid zoneGrid">${p.zones.map((zone, idx) => ZoneCard(zone, idx, p)).join('')}</div>` : EmptyState({ title: 'Зоны ещё не добавлены', text: 'Добавьте default-набор для выбранного типа проекта или выберите конкретные шаблоны ниже.', actions: '<button class="btn primary" data-add-typical>Добавить типовые зоны</button><button class="btn ghost" data-add-zone>Добавить вручную</button>' })}
 
   <div class="separator"></div>
   <section class="card templatePanel"><div class="sectionTitle"><div><h3>Библиотека шаблонов</h3><p class="muted">Карточки компактные: состав оборудования раскрывается по клику.</p></div><span class="badge">${templates.length} шаблонов</span></div>

@@ -7,6 +7,7 @@ import { mapLegacyCategoryToEquipment, rootCategoryName, subcategoryName } from 
 import { dependenciesForItem, resolveMissingDependencies, createDependencyFallbackItem } from './dependencyResolver.js';
 import { classifySupplierItem } from './catalogRelevance.js';
 import { canUseItemInAutoEstimate, filterAutoEstimateCandidates } from './autoEstimateEligibility.js';
+import { SUPPLIER_TEMPLATE_INDEX } from '../data/supplierTemplateIndex.js';
 
 const SOURCE_CATALOG = CATALOG;
 
@@ -76,17 +77,29 @@ export function normalizeCatalogItem(item) {
     dependencies: item.dependencies || [],
     alternatives: item.alternatives || [],
     tags: item.tags || [item.category, item.segment, item.supplier, solutionLevel].filter(Boolean),
-    supplier: item.supplier || '',
+    supplier: item.supplier || item.supplierName || '',
+    supplierName: item.supplierName || item.supplier || '',
     supplierId: item.supplierId || '',
-    catalogScope: item.catalogScope || item.relevance || '',
-    relevance: item.relevance || item.catalogScope || '',
+    supplierSku: item.supplierSku || item.sku || item.article || '',
+    supplierCategory: item.supplierCategory || item.sourceCategory || item.category || '',
+    catalogScope: item.catalogScope || item.catalogRelevance || item.relevance || '',
+    catalogRelevance: item.catalogRelevance || item.relevance || item.catalogScope || '',
+    relevance: item.relevance || item.catalogRelevance || item.catalogScope || '',
     relevanceScore: item.relevanceScore,
     relevanceReason: item.relevanceReason || '',
     requiresCatalogReview: Boolean(item.requiresCatalogReview),
     hiddenByDefault: Boolean(item.hiddenByDefault),
+    qualityVisibility: item.qualityVisibility || (item.hiddenByDefault ? 'hiddenByDefault' : 'default'),
     approvedForAutoEstimate: Boolean(item.approvedForAutoEstimate),
     supplierPriority: supplierPriority(item),
-    article: item.article || '',
+    priorityScore: Number(item.priorityScore || supplierPriority(item) || 0),
+    sourceType: item.sourceType || ((item.supplier || item.supplierName || item.supplierId) ? 'supplier' : 'baseLibrary'),
+    fallbackReason: item.fallbackReason || '',
+    templateRole: item.templateRole || '',
+    zoneTemplateId: item.zoneTemplateId || '',
+    replacementGroup: item.replacementGroup || item.category || '',
+    isPreferredForTemplates: Boolean(item.isPreferredForTemplates),
+    article: item.article || item.supplierSku || '',
     leadTime: item.leadTime || '',
     warranty: item.warranty || '',
     isPlaceholder: Boolean(item.isPlaceholder || /placeholder|условн|резерв|tbd/i.test(name)),
@@ -177,54 +190,144 @@ function levelDistance(item, scenario = 'base') {
 }
 
 function selectBestCandidate(candidates, scenario) {
-  return [...candidates].sort((a, b) => levelDistance(a, scenario) - levelDistance(b, scenario) || supplierPriority(b) - supplierPriority(a) || Number(b.unitCost || 0) - Number(a.unitCost || 0))[0];
+  return [...candidates].sort((a, b) => levelDistance(a, scenario) - levelDistance(b, scenario) || Number(b.priorityScore || 0) - Number(a.priorityScore || 0) || supplierPriority(b) - supplierPriority(a) || Number(b.unitCost || 0) - Number(a.unitCost || 0))[0];
 }
 
+const CATEGORY_ROLE_MAP = {
+  'ВКС-системы': 'codec / video conference',
+  'Конференц-системы': 'microphone',
+  'LCD-панели': 'display',
+  'LED-экраны': 'LED / video wall',
+  'Проекторы': 'projector',
+  'Проекционные экраны': 'projector',
+  'Интерактивные панели': 'touch panel',
+  'Микрофоны': 'microphone',
+  'Акустика': 'speaker',
+  'DSP и усилители': 'DSP',
+  'Коммутация': 'matrix / switcher',
+  'Сеть': 'cable / infrastructure',
+  'Кабельная инфраструктура': 'cable / infrastructure',
+  'Крепления и конструкции': 'installation accessory',
+  'Медиасерверы': 'codec / video conference',
+  'ПК': 'codec / video conference',
+  'PTZ-камеры': 'camera',
+  'Свет': 'installation accessory',
+  'VR / AR': 'touch panel',
+  'Системы управления': 'control processor',
+  'ИБП': 'rack / power',
+  'Доп. оборудование': 'installation accessory'
+};
 
-function pickCatalogItemsForZone(zone, project, scenario, limit = 12) {
+const SUPPLIER_TEMPLATE_LIBRARY = Object.fromEntries(Object.entries(SUPPLIER_TEMPLATE_INDEX).map(([category, items]) => [
+  category,
+  items.map(item => normalizeCatalogItem({ ...item, replacementGroup: item.replacementGroup || category, sourceType: 'supplier', isPreferredForTemplates: true }))
+]));
+
+function templateRoleForCategory(category = '') { return CATEGORY_ROLE_MAP[category] || category || 'equipment'; }
+function isSupplierItem(item = {}) { return item.sourceType === 'supplier' || Boolean(item.supplier || item.supplierName || item.supplierId); }
+function sourceLabel(item = {}) { return isSupplierItem(item) ? 'supplier' : item.sourceType || 'baseLibrary'; }
+function hasUsableSupplierData(item = {}) { return Boolean(item.name && (item.supplier || item.supplierName) && Number(item.unitCost ?? item.price ?? 0) > 0); }
+function supplierTemplatePool(category = '') { return [...(SUPPLIER_TEMPLATE_LIBRARY[category] || [])]; }
+function groupMatchesItem(item = {}, category = '') { return item.category === category || item.replacementGroup === category || item.systemGroups?.includes(category) || item.categoryId === category || item.subcategoryId === category; }
+function decoratePickedItem(item, { qty = 1, category = '', role = '', zone = {}, source = '', fallbackReason = '' } = {}) {
+  const supplier = item.supplierName || item.supplier || '';
+  return {
+    ...item,
+    recommendedQty: qty,
+    sourceType: source || sourceLabel(item),
+    supplierName: supplier,
+    supplier: supplier || item.supplier || '',
+    supplierSku: item.supplierSku || item.article || '',
+    supplierCategory: item.supplierCategory || item.category || category,
+    catalogRelevance: item.catalogRelevance || item.relevance || item.catalogScope || '',
+    qualityVisibility: item.qualityVisibility || (item.hiddenByDefault ? 'hiddenByDefault' : 'default'),
+    templateRole: role || item.templateRole || templateRoleForCategory(category),
+    zoneTemplateId: zone.templateId || item.zoneTemplateId || '',
+    replacementGroup: category || item.replacementGroup || item.category || '',
+    isPreferredForTemplates: source === 'supplier' || Boolean(item.isPreferredForTemplates),
+    fallbackReason
+  };
+}
+
+function selectSupplierCandidate(category, zone, project, scenario, context, seen) {
+  const pool = filterAutoEstimateCandidates(supplierTemplatePool(category).filter(item =>
+    !seen.has(item.id)
+    && groupMatchesItem(item, category)
+    && levelCompatible(item, scenario)
+    && hasUsableSupplierData(item)
+  ), { ...context, requiredCategory: category });
+  return selectBestCandidate(pool, scenario);
+}
+
+function selectBaseLibraryFallback(category, zone, project, scenario, context, seen) {
+  const strictPool = filterAutoEstimateCandidates(LIBRARY.filter(item =>
+    !isSupplierItem(item)
+    && !seen.has(item.id)
+    && groupMatchesItem(item, category)
+    && itemMatchesContext(item, zone, project, scenario)
+  ), { ...context, requiredCategory: category });
+  const loosePool = filterAutoEstimateCandidates(LIBRARY.filter(item =>
+    !isSupplierItem(item)
+    && !seen.has(item.id)
+    && groupMatchesItem(item, category)
+  ), { ...context, requiredCategory: category });
+  const textPool = filterAutoEstimateCandidates(LIBRARY.filter(item =>
+    !isSupplierItem(item)
+    && !seen.has(item.id)
+    && String(item.category || '').toLowerCase().includes(String(category).toLowerCase().split(' ')[0])
+    && levelCompatible(item, scenario)
+  ), { ...context, requiredCategory: category });
+  return selectBestCandidate(strictPool, scenario) || selectBestCandidate(loosePool, scenario) || selectBestCandidate(textPool, scenario);
+}
+
+function pickCatalogItemsForZoneDetailed(zone, project, scenario, limit = 12) {
   const template = getZoneTemplate(zone.templateId);
   const context = { zone, project, template, source: 'auto-estimate' };
   const recommendedItems = (zone.recommendedItems && zone.recommendedItems.length ? zone.recommendedItems : template?.recommendedItems || [])
     .map(item => ({ ...item, category: canonicalSystemGroups([item.category || item.group])[0] }))
     .sort((a, b) => (a.priority || 999) - (b.priority || 999));
   const categories = recommendedCategoriesForZone(zone);
+  const requiredRows = [];
+  const rowKeys = new Set();
+  const pushRequirement = (category, qty = 1, name = '') => {
+    if (!category || rowKeys.has(category) || requiredRows.length >= limit) return;
+    rowKeys.add(category);
+    requiredRows.push({ category, qty, name, role: templateRoleForCategory(category) });
+  };
+  recommendedItems.forEach(item => pushRequirement(item.category, item.qty || 1, item.name || item.category));
+  categories.forEach(category => pushRequirement(category, 1, category));
+
   const picked = [];
   const seen = new Set();
+  const missingRoles = [];
+  let supplierCount = 0;
+  let fallbackCount = 0;
 
-  const autoCandidates = (items, requiredCategory = '') => filterAutoEstimateCandidates(items, { ...context, requiredCategory });
-
-  const pickByCategory = (category, qty = 1) => {
-    const strictPool = autoCandidates(LIBRARY.filter(item =>
-      (item.category === category || item.systemGroups?.includes(category) || item.categoryId === category || item.subcategoryId === category)
-      && itemMatchesContext(item, zone, project, scenario)
-      && !seen.has(item.id)
-    ), category);
-    const fallbackPool = autoCandidates(LIBRARY.filter(item =>
-      (item.category === category || item.systemGroups?.includes(category) || item.categoryId === category || item.subcategoryId === category)
-      && !seen.has(item.id)
-    ), category);
-    const candidate = selectBestCandidate(strictPool, scenario) || selectBestCandidate(fallbackPool, scenario);
-    if (candidate && picked.length < limit) {
-      picked.push({ ...candidate, recommendedQty: qty });
-      seen.add(candidate.id);
+  for (const req of requiredRows) {
+    if (picked.length >= limit) break;
+    const supplierCandidate = selectSupplierCandidate(req.category, zone, project, scenario, context, seen);
+    if (supplierCandidate) {
+      picked.push(decoratePickedItem(supplierCandidate, { qty: req.qty, category: req.category, role: req.role, zone, source: 'supplier' }));
+      seen.add(supplierCandidate.id);
+      supplierCount += 1;
+      continue;
     }
-  };
-
-  recommendedItems.forEach(item => pickByCategory(item.category, item.qty || 1));
-  categories.forEach(category => pickByCategory(category, 1));
-
-  if (picked.length < Math.min(limit, categories.length)) {
-    categories.forEach(category => {
-      const pool = autoCandidates(LIBRARY.filter(item => String(item.category || '').toLowerCase().includes(String(category).toLowerCase().split(' ')[0]) && levelCompatible(item, scenario) && !seen.has(item.id)), category);
-      const candidate = selectBestCandidate(pool, scenario);
-      if (candidate && picked.length < limit) { picked.push({ ...candidate, recommendedQty: 1 }); seen.add(candidate.id); }
-    });
+    const fallback = selectBaseLibraryFallback(req.category, zone, project, scenario, context, seen);
+    if (fallback) {
+      const reason = `Нет подходящей supplier-позиции для роли «${req.role}» / группы «${req.category}». Использована базовая библиотека.`;
+      picked.push(decoratePickedItem(fallback, { qty: req.qty, category: req.category, role: req.role, zone, source: 'baseLibrary', fallbackReason: reason }));
+      seen.add(fallback.id);
+      fallbackCount += 1;
+      continue;
+    }
+    missingRoles.push({ category: req.category, role: req.role, name: req.name || req.category, reason: 'Нет supplier-позиции и fallback в базовой библиотеке' });
   }
-  if (picked.length < limit) {
-    autoCandidates(LIBRARY.filter(item => itemMatchesContext(item, zone, project, scenario) && !seen.has(item.id)))
-      .slice(0, limit - picked.length).forEach(item => { picked.push({ ...item, recommendedQty: 1 }); seen.add(item.id); });
-  }
-  return picked;
+
+  return { items: picked, missingRoles, supplierCount, fallbackCount, requiredCount: requiredRows.length };
+}
+
+function pickCatalogItemsForZone(zone, project, scenario, limit = 12) {
+  return pickCatalogItemsForZoneDetailed(zone, project, scenario, limit).items;
 }
 
 function addDerivedWorkItems(project, zone, existingKeys) {
@@ -273,6 +376,19 @@ export function addCatalogItemToProject(project, catalogItem, zoneId = '', optio
     approvedForAutoEstimate: Boolean(catalogItem.approvedForAutoEstimate),
     systemGroups: catalogItem.systemGroups || [],
     dependencies: catalogItem.dependencies || [],
+    supplier: catalogItem.supplier || catalogItem.supplierName || '',
+    supplierName: catalogItem.supplierName || catalogItem.supplier || '',
+    supplierSku: catalogItem.supplierSku || catalogItem.article || '',
+    supplierCategory: catalogItem.supplierCategory || catalogItem.category || '',
+    sourceType: catalogItem.sourceType || '',
+    catalogRelevance: catalogItem.catalogRelevance || catalogItem.relevance || catalogItem.catalogScope || '',
+    qualityVisibility: catalogItem.qualityVisibility || (catalogItem.hiddenByDefault ? 'hiddenByDefault' : 'default'),
+    priorityScore: catalogItem.priorityScore || 0,
+    fallbackReason: catalogItem.fallbackReason || '',
+    templateRole: catalogItem.templateRole || '',
+    zoneTemplateId: catalogItem.zoneTemplateId || '',
+    replacementGroup: catalogItem.replacementGroup || catalogItem.category || '',
+    isPreferredForTemplates: Boolean(catalogItem.isPreferredForTemplates),
     unit: catalogItem.unit,
     qty: options.qty ?? 1,
     currency: catalogItem.currency || 'RUB',
@@ -339,18 +455,21 @@ export function generateEstimateFromZones(project, options = {}) {
       report.skippedZones.push({ id: zone.id, name: zone.name, reason: 'Не выбран тип зоны' });
       return;
     }
-    const matching = pickCatalogItemsForZone(zone, project, scenario, 12);
+    const selection = pickCatalogItemsForZoneDetailed(zone, project, scenario, 12);
+    const matching = selection.items;
+    zone.catalogSelectionWarnings = selection.missingRoles || [];
     if (!matching.length) {
       report.skippedZones.push({ id: zone.id, name: zone.name, reason: 'Нет подходящих AV-релевантных позиций каталога' });
       report.warnings.push(`Для зоны «${zone.name}» не найдены позиции, прошедшие фильтр релевантности. Используйте curated fallback или добавьте позицию вручную.`);
       return;
     }
-    report.processedZones.push({ id: zone.id, name: zone.name, count: matching.length, categoryId: zone.categoryId, templateId: zone.templateId });
+    report.processedZones.push({ id: zone.id, name: zone.name, count: matching.length, supplierCount: selection.supplierCount, fallbackCount: selection.fallbackCount, missingRoles: selection.missingRoles, categoryId: zone.categoryId, templateId: zone.templateId });
+    (selection.missingRoles || []).forEach(role => report.warnings.push(`Для зоны «${zone.name}» не найдена роль ${role.role} / ${role.category}: ${role.reason}.`));
     report.added += addDerivedWorkItems(project, zone, existingKeys);
     matching.forEach(item => {
       const derivedKey = `${zone.id}:${item.id}`;
       if (existingKeys.has(derivedKey)) return;
-      addCatalogItemToProject(project, item, zone.id, { source: 'derived', isDerived: true, derivedKey, qty: item.recommendedQty || 1 });
+      addCatalogItemToProject(project, item, zone.id, { source: item.sourceType === 'supplier' ? 'supplier-first' : 'library-fallback', isDerived: true, derivedKey, qty: item.recommendedQty || 1 });
       existingKeys.add(derivedKey);
       report.added += 1;
     });

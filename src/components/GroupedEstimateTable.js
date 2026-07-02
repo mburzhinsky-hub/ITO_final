@@ -24,11 +24,24 @@ function header(mode) {
 }
 function row(item, zoneName, settings, mode) {
   const sum = formatMoney(itemCostRub(item, settings));
+  const sourceBadge = sourceBadgeHtml(item);
   if (mode === 'detailed') return `<tr>
-    <td>${escapeHtml(zoneName(item.zoneId))}</td><td><input data-item-field="name" data-item-id="${escapeAttr(item.id)}" value="${escapeAttr(item.name)}"></td><td><input data-item-field="category" data-item-id="${escapeAttr(item.id)}" value="${escapeAttr(item.category)}"></td><td><input data-item-field="unit" data-item-id="${escapeAttr(item.id)}" value="${escapeAttr(item.unit)}"></td><td><input type="number" step="0.1" data-item-field="qty" data-item-id="${escapeAttr(item.id)}" value="${item.qty}"></td><td><input type="number" step="1" data-item-field="unitCost" data-item-id="${escapeAttr(item.id)}" value="${item.unitCost}"></td><td><select data-item-field="currency" data-item-id="${escapeAttr(item.id)}"><option value="RUB" ${item.currency==='RUB'?'selected':''}>RUB</option><option value="USD" ${item.currency==='USD'?'selected':''}>USD</option></select></td><td><span class="badge">${escapeHtml(item.source)}${item.isDerived ? ' / derived' : ' / manual'}</span></td><td><input data-item-field="note" data-item-id="${escapeAttr(item.id)}" value="${escapeAttr(item.note || '')}"></td><td class="money">${sum}</td><td><button class="btn danger small" data-item-delete="${escapeAttr(item.id)}">Удалить</button></td>
+    <td>${escapeHtml(zoneName(item.zoneId))}</td><td><input data-item-field="name" data-item-id="${escapeAttr(item.id)}" value="${escapeAttr(item.name)}"></td><td><input data-item-field="category" data-item-id="${escapeAttr(item.id)}" value="${escapeAttr(item.category)}"></td><td><input data-item-field="unit" data-item-id="${escapeAttr(item.id)}" value="${escapeAttr(item.unit)}"></td><td><input type="number" step="0.1" data-item-field="qty" data-item-id="${escapeAttr(item.id)}" value="${item.qty}"></td><td><input type="number" step="1" data-item-field="unitCost" data-item-id="${escapeAttr(item.id)}" value="${item.unitCost}"></td><td><select data-item-field="currency" data-item-id="${escapeAttr(item.id)}"><option value="RUB" ${item.currency==='RUB'?'selected':''}>RUB</option><option value="USD" ${item.currency==='USD'?'selected':''}>USD</option></select></td><td>${sourceBadge}</td><td><input data-item-field="note" data-item-id="${escapeAttr(item.id)}" value="${escapeAttr(item.note || '')}"></td><td class="money">${sum}</td><td><button class="btn danger small" data-item-delete="${escapeAttr(item.id)}">Удалить</button></td>
   </tr>`;
-  return `<tr><td>${escapeHtml(zoneName(item.zoneId))}</td><td><input data-item-field="name" data-item-id="${escapeAttr(item.id)}" value="${escapeAttr(item.name)}"></td><td><input data-item-field="category" data-item-id="${escapeAttr(item.id)}" value="${escapeAttr(item.category)}"></td><td><input type="number" step="0.1" data-item-field="qty" data-item-id="${escapeAttr(item.id)}" value="${item.qty}"></td><td><input type="number" step="1" data-item-field="unitCost" data-item-id="${escapeAttr(item.id)}" value="${item.unitCost}"></td><td class="money">${sum}</td><td><button class="btn danger small" data-item-delete="${escapeAttr(item.id)}">Удалить</button></td></tr>`;
+  return `<tr><td>${escapeHtml(zoneName(item.zoneId))}</td><td><input data-item-field="name" data-item-id="${escapeAttr(item.id)}" value="${escapeAttr(item.name)}"><div class="smallText muted">${sourceBadge}</div></td><td><input data-item-field="category" data-item-id="${escapeAttr(item.id)}" value="${escapeAttr(item.category)}"></td><td><input type="number" step="0.1" data-item-field="qty" data-item-id="${escapeAttr(item.id)}" value="${item.qty}"></td><td><input type="number" step="1" data-item-field="unitCost" data-item-id="${escapeAttr(item.id)}" value="${item.unitCost}"></td><td class="money">${sum}</td><td><button class="btn danger small" data-item-delete="${escapeAttr(item.id)}">Удалить</button></td></tr>`;
 }
+
+function sourceBadgeHtml(item = {}) {
+  if (item.sourceType === 'supplier') {
+    const supplier = item.supplierName || item.supplier || 'поставщик';
+    const sku = item.supplierSku ? ` · ${item.supplierSku}` : '';
+    return `<span class="badge ok">supplier</span> <span class="muted smallText">${escapeHtml(supplier + sku)}</span>`;
+  }
+  if (item.sourceType === 'baseLibrary' || item.fallbackReason) return '<span class="badge warn">fallback library</span>';
+  if (item.source === 'manual') return '<span class="badge">manual</span>';
+  return `<span class="badge">${escapeHtml(item.source || 'calculated')}</span>`;
+}
+
 function groupItems(items) {
   const map = new Map();
   items.forEach(item => { const key = normalizeCategory(item.category); if (!map.has(key)) map.set(key, []); map.get(key).push(item); });
