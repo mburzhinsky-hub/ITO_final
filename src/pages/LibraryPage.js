@@ -1,7 +1,7 @@
 import { AppLayout, bindLayoutActions } from '../components/AppLayout.js';
 import { PageHeader } from '../components/PageHeader.js';
 import { EmptyState } from '../components/EmptyState.js';
-import { ensureProject, persistProject, getSettings } from '../app/state.js';
+import { ensureProject, persistProject, getSettings, getUiMode } from '../app/state.js';
 import { LIBRARY, addCatalogItemToProject } from '../engine/estimate.js';
 import { createEstimateItem, createZone } from '../engine/projectFactory.js';
 import { toast } from '../utils/dom.js';
@@ -37,7 +37,9 @@ export function LibraryPage(root) {
   const p = ensureProject();
   const settings = getSettings();
   const q = new URLSearchParams(location.hash.split('?')[1] || '');
-  const state = readState(q);
+  const uiMode = getUiMode();
+  const engineering = uiMode === 'engineering';
+  const state = { ...readState(q), advanced: engineering && readState(q).advanced };
   const tab = q.get('tab') || 'equipment';
   const loadAll = q.get('loadSuppliers') === 'all';
   const requestedSupplierId = q.get('supplier') || '';
@@ -75,7 +77,7 @@ export function LibraryPage(root) {
   root.innerHTML = AppLayout(`${PageHeader({ title: 'Библиотека', description: 'Быстрая AV-библиотека доступна сразу. Полные прайсы поставщиков лежат в public/data/suppliers/*.json и загружаются только по кнопке или выбору поставщика.', actions: `<span class="badge lime">${LIBRARY.length} быстрых</span><span class="badge">${supplierStatus.loadedItemCount} supplier</span><span class="badge ${quality.errors ? 'warn' : 'ok'}">качество: ${quality.totalIssues}</span>${supplierAction}` })}
     ${supplierPanelHtml}
     <div class="libraryTabs"><a class="btn ${tab === 'equipment' ? 'primary' : 'ghost'} small" href="#/library?tab=equipment">Оборудование</a><a class="btn ${tab === 'templates' ? 'primary' : 'ghost'} small" href="#/library?tab=templates">Шаблоны инсталляций</a><a class="btn ${tab === 'quality' ? 'primary' : 'ghost'} small" href="#/library?tab=quality">Качество данных</a></div>
-    ${tab === 'equipment' ? equipmentTab(p, settings, state, items, deps, library, filteredItems.length) : ''}
+    ${tab === 'equipment' ? equipmentTab(p, settings, state, items, deps, library, filteredItems.length, engineering) : ''}
     ${tab === 'templates' ? templatesTab(state, templates) : ''}
     ${tab === 'quality' ? qualityTab(quality, deps, relevanceReport) : ''}`);
   bindLayoutActions(root); bind(root, p, state, library);
@@ -103,12 +105,12 @@ function readState(q) {
   };
 }
 
-function equipmentTab(project, settings, state, items, deps, library, total) {
+function equipmentTab(project, settings, state, items, deps, library, total, engineering = false) {
   const shown = Math.min(total, Number(state.limit || 72));
-  return `${state.advanced ? CatalogQualityFilters({ scope: state.scope, items: library }) : ''}${LibraryFilters({ ...state, zones: project.zones || [], suppliers: supplierMeta?.suppliers || [], advanced: state.advanced })}
+  return `${engineering && state.advanced ? CatalogQualityFilters({ scope: state.scope, items: library }) : ''}${LibraryFilters({ ...state, zones: project.zones || [], suppliers: supplierMeta?.suppliers || [], advanced: engineering && state.advanced, allowAdvanced: engineering })}
     <div class="notice"><strong>Показано ${shown} из ${total}</strong><p>Каталог не рендерит десятки тысяч карточек сразу. Для supplier-позиций по умолчанию видны AV-оборудование, AV-инфраструктура и работы/услуги.</p>${total > shown ? `<div class="actions"><button class="btn ghost small" data-show-more>Показать ещё</button></div>` : ''}</div>
     ${deps.length ? `<div class="notice warn"><strong>В проекте есть незакрытые зависимости: ${deps.length}</strong><p>Откройте проверку или добавьте fallback-позиции вручную.</p><div class="actions">${deps.slice(0, 4).map(dep => `<button class="btn ghost small" data-add-dependency-fallback="${dep.id}">${dep.fallbackName}</button>`).join('')}<a class="btn ghost small" href="#/check">Проверка</a></div></div>` : ''}
-    <div class="separator"></div>${items.length ? `<div class="libraryGrid">${items.map(item => EquipmentCard(item, settings, library)).join('')}</div>` : EmptyState({ title: 'Ничего не найдено', text: 'Сбросьте фильтры, выберите поставщика или загрузите полный прайс.', actions: '<button class="btn ghost" data-reset-library>Сбросить фильтры</button><button class="btn primary" data-add-manual-lib>Добавить ручную позицию</button>' })}`;
+    <div class="separator"></div>${items.length ? `<div class="libraryGrid">${items.map(item => EquipmentCard(item, settings, library, { showCurationActions: engineering })).join('')}</div>` : EmptyState({ title: 'Ничего не найдено', text: 'Сбросьте фильтры, выберите поставщика или загрузите полный прайс.', actions: '<button class="btn ghost" data-reset-library>Сбросить фильтры</button><button class="btn primary" data-add-manual-lib>Добавить ручную позицию</button>' })}`;
 }
 
 function supplierPanel(meta, status, state) {
@@ -123,7 +125,7 @@ function supplierPanel(meta, status, state) {
 }
 
 function templatesTab(state, templates) {
-  return `${LibraryFilters({ ...state, zones: [], suppliers: supplierMeta?.suppliers || [], advanced: state.advanced })}<div class="separator"></div>${InstallationTemplateList(templates)}`;
+  return `${LibraryFilters({ ...state, zones: [], suppliers: supplierMeta?.suppliers || [], advanced: state.advanced, allowAdvanced: true })}<div class="separator"></div>${InstallationTemplateList(templates)}`;
 }
 
 function qualityTab(quality, deps, relevanceReport) {

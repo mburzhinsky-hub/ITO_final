@@ -8,6 +8,7 @@ import { dependenciesForItem, resolveMissingDependencies, createDependencyFallba
 import { classifySupplierItem } from './catalogRelevance.js';
 import { canUseItemInAutoEstimate, filterAutoEstimateCandidates } from './autoEstimateEligibility.js';
 import { SUPPLIER_TEMPLATE_INDEX } from '../data/supplierTemplateIndex.js';
+import { enrichItemRoleFit, scoreRoleFit, templateRoleForCategory } from './roleScoring.js';
 
 const SOURCE_CATALOG = CATALOG;
 
@@ -93,6 +94,11 @@ export function normalizeCatalogItem(item) {
     approvedForAutoEstimate: Boolean(item.approvedForAutoEstimate),
     supplierPriority: supplierPriority(item),
     priorityScore: Number(item.priorityScore || supplierPriority(item) || 0),
+    roleFitScore: item.roleFitScore !== undefined ? Number(item.roleFitScore) : undefined,
+    roleFitMinScore: item.roleFitMinScore !== undefined ? Number(item.roleFitMinScore) : undefined,
+    roleFitReason: item.roleFitReason || '',
+    templateRoleId: item.templateRoleId || '',
+    needsEngineerReview: Boolean(item.needsEngineerReview),
     sourceType: item.sourceType || ((item.supplier || item.supplierName || item.supplierId) ? 'supplier' : 'baseLibrary'),
     fallbackReason: item.fallbackReason || '',
     templateRole: item.templateRole || '',
@@ -103,7 +109,7 @@ export function normalizeCatalogItem(item) {
     leadTime: item.leadTime || '',
     warranty: item.warranty || '',
     isPlaceholder: Boolean(item.isPlaceholder || /placeholder|условн|резерв|tbd/i.test(name)),
-    requiresEngineerReview: Boolean(item.requiresEngineerReview || unitCost <= 0 || /условн|провер|расчет|расчёт/i.test(item.note || '')),
+    requiresEngineerReview: Boolean(item.requiresEngineerReview || item.needsEngineerReview || unitCost <= 0 || /условн|провер|расчет|расчёт/i.test(item.note || '')),
     requiresPriceRequest: Boolean(item.requiresPriceRequest || unitCost <= 0),
     note: item.note || item.description || '',
     imported: Boolean(item.imported)
@@ -216,7 +222,9 @@ export function selectBestCandidate(candidates = [], scenario) {
   if (!candidates.length) return undefined;
   const median = medianValidPrice(candidates);
   return [...candidates].sort((a, b) =>
-    levelDistance(a, scenario) - levelDistance(b, scenario)
+    Number(b.roleFitScore || 0) - Number(a.roleFitScore || 0)
+    || Number(isSupplierItem(b)) - Number(isSupplierItem(a))
+    || levelDistance(a, scenario) - levelDistance(b, scenario)
     || Number(b.priorityScore || 0) - Number(a.priorityScore || 0)
     || supplierPriority(b) - supplierPriority(a)
     || validPriceScore(b) - validPriceScore(a)
@@ -226,42 +234,26 @@ export function selectBestCandidate(candidates = [], scenario) {
   )[0];
 }
 
-const CATEGORY_ROLE_MAP = {
-  'ВКС-системы': 'codec / video conference',
-  'Конференц-системы': 'microphone',
-  'LCD-панели': 'display',
-  'LED-экраны': 'LED / video wall',
-  'Проекторы': 'projector',
-  'Проекционные экраны': 'projector',
-  'Интерактивные панели': 'touch panel',
-  'Микрофоны': 'microphone',
-  'Акустика': 'speaker',
-  'DSP и усилители': 'DSP',
-  'Коммутация': 'matrix / switcher',
-  'Сеть': 'cable / infrastructure',
-  'Кабельная инфраструктура': 'cable / infrastructure',
-  'Крепления и конструкции': 'installation accessory',
-  'Медиасерверы': 'codec / video conference',
-  'ПК': 'codec / video conference',
-  'PTZ-камеры': 'camera',
-  'Свет': 'installation accessory',
-  'VR / AR': 'touch panel',
-  'Системы управления': 'control processor',
-  'ИБП': 'rack / power',
-  'Доп. оборудование': 'installation accessory'
-};
-
 const SUPPLIER_TEMPLATE_LIBRARY = Object.fromEntries(Object.entries(SUPPLIER_TEMPLATE_INDEX).map(([category, items]) => [
   category,
   items.map(item => normalizeCatalogItem({ ...item, replacementGroup: item.replacementGroup || category, sourceType: 'supplier', isPreferredForTemplates: true }))
 ]));
 
-function templateRoleForCategory(category = '') { return CATEGORY_ROLE_MAP[category] || category || 'equipment'; }
 function isSupplierItem(item = {}) { return item.sourceType === 'supplier' || Boolean(item.supplier || item.supplierName || item.supplierId); }
 function sourceLabel(item = {}) { return isSupplierItem(item) ? 'supplier' : item.sourceType || 'baseLibrary'; }
 function hasUsableSupplierData(item = {}) { return Boolean(item.name && (item.supplier || item.supplierName) && Number(item.unitCost ?? item.price ?? 0) > 0); }
 function supplierTemplatePool(category = '') { return [...(SUPPLIER_TEMPLATE_LIBRARY[category] || [])]; }
-function groupMatchesItem(item = {}, category = '') { return item.category === category || item.replacementGroup === category || item.systemGroups?.includes(category) || item.categoryId === category || item.subcategoryId === category; }
+function groupMatchesItem(item = {}, category = '') { return item.category === category || item.replacementGroup === category || item.systemGroups?.includes(category) || item.categoryId === category || item.subcategoryId === category || item.templateRole === templateRoleForCategory(category); }
+function itemWithRoleFit(item = {}, category = '') {
+  const role = templateRoleForCategory(category);
+  return enrichItemRoleFit(item, role, { category });
+}
+function roleFitIsUsable(item = {}, category = '') {
+  const fit = item.roleFitScore !== undefined && item.roleFitMinScore !== undefined
+    ? { passed: Number(item.roleFitScore) >= Number(item.roleFitMinScore), score: Number(item.roleFitScore), minScore: Number(item.roleFitMinScore) }
+    : scoreRoleFit(item, templateRoleForCategory(category), { category });
+  return fit.passed;
+}
 function decoratePickedItem(item, { qty = 1, category = '', role = '', zone = {}, source = '', fallbackReason = '' } = {}) {
   const supplier = item.supplierName || item.supplier || '';
   return {
@@ -277,39 +269,48 @@ function decoratePickedItem(item, { qty = 1, category = '', role = '', zone = {}
     templateRole: role || item.templateRole || templateRoleForCategory(category),
     zoneTemplateId: zone.templateId || item.zoneTemplateId || '',
     replacementGroup: category || item.replacementGroup || item.category || '',
+    roleFitScore: item.roleFitScore,
+    roleFitMinScore: item.roleFitMinScore,
+    roleFitReason: item.roleFitReason || '',
+    templateRoleId: item.templateRoleId || '',
+    needsEngineerReview: Boolean(item.needsEngineerReview),
+    requiresEngineerReview: Boolean(item.requiresEngineerReview || item.needsEngineerReview),
     isPreferredForTemplates: source === 'supplier' || Boolean(item.isPreferredForTemplates),
     fallbackReason
   };
 }
 
 function selectSupplierCandidate(category, zone, project, scenario, context, seen) {
-  const pool = filterAutoEstimateCandidates(supplierTemplatePool(category).filter(item =>
-    !seen.has(item.id)
-    && groupMatchesItem(item, category)
-    && levelCompatible(item, scenario)
-    && hasUsableSupplierData(item)
-  ), { ...context, requiredCategory: category });
+  const scored = supplierTemplatePool(category)
+    .filter(item => !seen.has(item.id) && groupMatchesItem(item, category) && levelCompatible(item, scenario) && hasUsableSupplierData(item))
+    .map(item => itemWithRoleFit(item, category))
+    .filter(item => roleFitIsUsable(item, category));
+  const pool = filterAutoEstimateCandidates(scored, { ...context, requiredCategory: category });
   return selectBestCandidate(pool, scenario);
 }
 
+function scoreFallbackPool(items, category) {
+  return items.map(item => itemWithRoleFit(item, category)).filter(item => roleFitIsUsable(item, category));
+}
+
 function selectBaseLibraryFallback(category, zone, project, scenario, context, seen) {
-  const strictPool = filterAutoEstimateCandidates(LIBRARY.filter(item =>
+  const strictPool = filterAutoEstimateCandidates(scoreFallbackPool(LIBRARY.filter(item =>
     !isSupplierItem(item)
     && !seen.has(item.id)
     && groupMatchesItem(item, category)
     && itemMatchesContext(item, zone, project, scenario)
-  ), { ...context, requiredCategory: category });
-  const loosePool = filterAutoEstimateCandidates(LIBRARY.filter(item =>
+  ), category), { ...context, requiredCategory: category });
+  const loosePool = filterAutoEstimateCandidates(scoreFallbackPool(LIBRARY.filter(item =>
     !isSupplierItem(item)
     && !seen.has(item.id)
     && groupMatchesItem(item, category)
-  ), { ...context, requiredCategory: category });
-  const textPool = filterAutoEstimateCandidates(LIBRARY.filter(item =>
+  ), category), { ...context, requiredCategory: category });
+  const textPool = filterAutoEstimateCandidates(scoreFallbackPool(LIBRARY.filter(item =>
     !isSupplierItem(item)
     && !seen.has(item.id)
     && String(item.category || '').toLowerCase().includes(String(category).toLowerCase().split(' ')[0])
     && levelCompatible(item, scenario)
-  ), { ...context, requiredCategory: category });
+  ), category), { ...context, requiredCategory: category });
   return selectBestCandidate(strictPool, scenario) || selectBestCandidate(loosePool, scenario) || selectBestCandidate(textPool, scenario);
 }
 
@@ -417,6 +418,11 @@ export function addCatalogItemToProject(project, catalogItem, zoneId = '', optio
     catalogRelevance: catalogItem.catalogRelevance || catalogItem.relevance || catalogItem.catalogScope || '',
     qualityVisibility: catalogItem.qualityVisibility || (catalogItem.hiddenByDefault ? 'hiddenByDefault' : 'default'),
     priorityScore: catalogItem.priorityScore || 0,
+    roleFitScore: catalogItem.roleFitScore,
+    roleFitMinScore: catalogItem.roleFitMinScore,
+    roleFitReason: catalogItem.roleFitReason || '',
+    templateRoleId: catalogItem.templateRoleId || '',
+    needsEngineerReview: Boolean(catalogItem.needsEngineerReview),
     fallbackReason: catalogItem.fallbackReason || '',
     templateRole: catalogItem.templateRole || '',
     zoneTemplateId: catalogItem.zoneTemplateId || '',

@@ -8,7 +8,7 @@ export function ProjectSummaryBar(project) {
   if (!project) return '';
   const totals = calculateProjectTotals(project);
   const warnings = validateProject(project);
-  const errors = warnings.filter(w => w.severity === 'error').length;
+  const errors = warnings.filter(w => isCritical(w)).length;
   const risks = warnings.length - errors;
   const warningText = errors ? `${errors} ошибок` : risks ? `${risks} предупреждений` : 'Без ошибок';
   const warningTone = errors ? 'danger' : risks ? 'warn' : 'ok';
@@ -19,3 +19,5 @@ export function ProjectSummaryBar(project) {
     <div><span class="badge ${warningTone}">${warningText}</span></div>
   </section>`;
 }
+
+function isCritical(warning = {}) { return warning.severity === 'critical' || warning.severity === 'error'; }

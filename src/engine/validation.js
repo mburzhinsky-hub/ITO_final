@@ -4,6 +4,7 @@ import { normalizeCurrency } from './currency.js';
 import { num } from '../utils/format.js';
 import { getProjectZoneModel, getZoneCategory, getZoneTemplate, canonicalSystemGroups } from '../data/zoneTaxonomy.js';
 import { resolveMissingDependencies } from './dependencyResolver.js';
+import { estimateLineCoversGroup, requiredGroupCoverageKeys } from './systemGroupCoverage.js';
 
 export function validateProject(project = {}, settingsInput = null) {
   const settings = settingsInput || mergedSettings(project);
@@ -14,7 +15,7 @@ export function validateProject(project = {}, settingsInput = null) {
     ...validateCommercialSettings(project, settings)
   ];
   const accepted = new Set(project.acceptedWarnings || []);
-  return warnings.filter(item => !accepted.has(item.id));
+  return deduplicateWarnings(warnings).filter(item => !accepted.has(item.id));
 }
 
 export function validatePassport(project = {}, settings = {}) {
@@ -57,12 +58,16 @@ export function validateEstimate(project = {}, settings = {}) {
     const zoneItems = zoneItemsByZone[zone.id] || [];
     const requiredGroups = canonicalSystemGroups(zone.requiredSystemGroups || getZoneTemplate(zone.templateId)?.requiredSystemGroups || []);
     requiredGroups.forEach(group => {
-      const covered = zoneItems.some(item => String(item.category || '').toLowerCase().includes(String(group).toLowerCase()) || String(group).toLowerCase().includes(String(item.category || '').toLowerCase()));
-      if (!covered && zoneItems.length) warnings.push(w(`zone-group-${zone.id}-${group}`, 'engineering', 'recommendation', 'AV-группа не закрыта в смете', `В зоне «${zone.name}» требуется группа «${group}», но в смете по этой зоне нет очевидной позиции этой категории.`, 'zone', zone.id, 'Проверить смету', 'open-estimate'));
+      const covered = zoneItems.some(item => estimateLineCoversGroup(item, group));
+      if (!covered && zoneItems.length) {
+        const expected = requiredGroupCoverageKeys(group).slice(0, 4).join(', ');
+        warnings.push(w(`zone-group-${zone.id}-${group}`, 'engineering', 'review', 'AV-группа не закрыта в смете', `В зоне «${zone.name}» требуется «${group}». Проверка искала покрытие по templateRole/replacementGroup/systemGroups: ${expected}.`, 'zone', zone.id, 'Проверить смету', 'open-estimate', { missingGroup: group, zoneName: zone.name }));
+      }
     });
   });
-  resolveMissingDependencies(project).slice(0, 40).forEach(dep => {
-    warnings.push(w(`dependency-${dep.id}`, 'engineering', dep.required ? 'warning' : 'recommendation', dep.required ? 'Не закрыта обязательная зависимость' : 'Не закрыта рекомендуемая зависимость', `Позиция «${dep.sourceItemName}» требует: ${dep.fallbackName}. ${dep.reason || ''}`, dep.zoneId ? 'zone' : 'estimate', dep.zoneId || project.id, 'Открыть библиотеку', 'open-estimate'));
+  resolveMissingDependencies(project).slice(0, 80).forEach(dep => {
+    const zone = (project.zones || []).find(item => item.id === dep.zoneId);
+    warnings.push(w(`dependency-${dep.id}`, 'engineering', dep.required ? 'warning' : 'review', dep.required ? 'Не закрыта обязательная зависимость' : 'Не закрыта рекомендуемая зависимость', `Позиция «${dep.sourceItemName}» требует: ${dep.fallbackName}. ${dep.reason || ''}`, dep.zoneId ? 'zone' : 'estimate', dep.zoneId || project.id, 'Открыть библиотеку', 'open-estimate', { dependencyId: dep.dependencyId, missingRole: dep.targetCategoryId || dep.targetSystemGroup || dep.fallbackName, missingGroup: dep.targetCategoryId || dep.targetSystemGroup || '', zoneId: dep.zoneId || '', zoneName: zone?.name || '', required: dep.required }));
   });
   items.forEach(item => {
     if (item.priceStatus === 'unknown' || item.requiresPriceRequest) warnings.push(w(`item-price-request-${item.id}`, 'estimate', 'warning', 'Нужно запросить цену', `У позиции «${item.name}» нет подтверждённой цены.`, 'item', item.id, 'Открыть смету', 'open-estimate'));
@@ -100,8 +105,62 @@ export function validateCommercialSettings(project = {}, settings = {}) {
   return warnings;
 }
 
+function deduplicateWarnings(warnings = []) {
+  const grouped = new Map();
+  const output = [];
+  warnings.forEach(warning => {
+    const key = warningGroupKey(warning);
+    if (!key) {
+      output.push(warning);
+      return;
+    }
+    const existing = grouped.get(key);
+    if (!existing) {
+      grouped.set(key, { ...warning, groupedCount: 1, affectedZones: warning.zoneName ? [warning.zoneName] : [], affectedEntityIds: warning.entityId ? [warning.entityId] : [] });
+      return;
+    }
+    existing.groupedCount += 1;
+    if (warning.zoneName && !existing.affectedZones.includes(warning.zoneName)) existing.affectedZones.push(warning.zoneName);
+    if (warning.entityId && !existing.affectedEntityIds.includes(warning.entityId)) existing.affectedEntityIds.push(warning.entityId);
+    existing.severity = higherSeverity(existing.severity, warning.severity);
+  });
+  grouped.forEach(item => output.push(groupedWarningMessage(item)));
+  return output;
+}
+
+function warningGroupKey(warning = {}) {
+  if (warning.type !== 'engineering') return '';
+  if (warning.id?.startsWith('dependency-')) return ['dependency', warning.missingRole || warning.missingGroup || warning.title, warning.zoneId || warning.entityId || 'project', warning.required ? 'required' : 'recommended'].join('|');
+  if (warning.id?.startsWith('zone-group-')) return ['zone-group', warning.missingGroup || warning.title, warning.zoneId || warning.entityId || 'project'].join('|');
+  return '';
+}
+
+function groupedWarningMessage(warning = {}) {
+  if (warning.groupedCount <= 1) return warning;
+  const zones = warning.affectedZones?.length ? ` Зоны: ${warning.affectedZones.slice(0, 6).join(', ')}${warning.affectedZones.length > 6 ? '…' : ''}.` : '';
+  const recommendedAction = warning.actionLabel ? ` Рекомендованное действие: ${warning.actionLabel}.` : '';
+  return {
+    ...warning,
+    id: `grouped-${warning.id}`,
+    title: warning.title,
+    message: `${warning.message} Повторяется: ${warning.groupedCount} строк.${zones}${recommendedAction}`,
+    recommendedAction: warning.actionLabel || ''
+  };
+}
+
+function higherSeverity(a = 'info', b = 'info') {
+  const order = ['info', 'review', 'recommendation', 'warning', 'critical', 'error'];
+  return order.indexOf(b) > order.indexOf(a) ? b : a;
+}
+
+function normalizeSeverity(severity = 'info') {
+  if (severity === 'error') return 'critical';
+  if (severity === 'recommendation') return 'review';
+  return severity;
+}
+
 function customerName(project = {}) { return String(project.customerName || project.customer || project.passport?.customerName || project.passport?.customer || ''); }
 
-function w(id, type, severity, title, message, entityType, entityId, actionLabel, actionType) {
-  return { id, type, severity, title, message, entityType, entityId, actionLabel, actionType };
+function w(id, type, severity, title, message, entityType, entityId, actionLabel, actionType, meta = {}) {
+  return { id, type, severity: normalizeSeverity(severity), title, message, entityType, entityId, actionLabel, actionType, ...meta };
 }

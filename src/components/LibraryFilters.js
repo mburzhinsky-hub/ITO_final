@@ -2,7 +2,7 @@ import { EQUIPMENT_CATEGORIES, childCategories, QUICK_EQUIPMENT_FILTERS } from '
 import { ZONE_CATEGORIES } from '../data/zoneTaxonomy.js';
 import { escapeAttr, escapeHtml } from '../utils/format.js';
 
-export function LibraryFilters({ search = '', category = 'all', subcategory = 'all', level = 'all', currency = 'all', price = 'all', projectType = 'all', zoneCategory = 'all', review = 'all', scope = 'default', supplier = 'all', zones = [], suppliers = [], advanced = false } = {}) {
+export function LibraryFilters({ search = '', category = 'all', subcategory = 'all', level = 'all', currency = 'all', price = 'all', projectType = 'all', zoneCategory = 'all', review = 'all', scope = 'default', supplier = 'all', zones = [], suppliers = [], advanced = false, allowAdvanced = true } = {}) {
   const subcategories = category === 'all' ? [] : childCategories(category);
   const advancedButtonText = advanced ? 'Скрыть расширенные фильтры' : 'Показать больше фильтров';
   return `<div class="card libraryFilters">
@@ -13,8 +13,8 @@ export function LibraryFilters({ search = '', category = 'all', subcategory = 'a
       <label class="field"><span>Поставщик</span><select data-lib-supplier><option value="all">Все загруженные</option>${suppliers.map(s => `<option value="${escapeAttr(s.id)}" ${s.id === supplier ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('')}</select></label>
       <label class="field"><span>Зона для добавления</span><select data-target-zone><option value="">Без зоны</option>${zones.map(z => `<option value="${escapeAttr(z.id)}">${escapeHtml(z.name)}</option>`).join('')}</select></label>
     </div>
-    <div class="actions"><button class="btn ghost small" data-toggle-library-advanced>${escapeHtml(advancedButtonText)}</button></div>
-    ${advanced ? `<div class="grid cols4 libraryFiltersAdvanced" data-library-advanced-filters>
+    ${allowAdvanced ? `<div class="actions"><button class="btn ghost small" data-toggle-library-advanced>${escapeHtml(advancedButtonText)}</button></div>` : ''}
+    ${advanced && allowAdvanced ? `<div class="grid cols4 libraryFiltersAdvanced" data-library-advanced-filters>
       <label class="field"><span>Подкатегория</span><select data-lib-subcategory><option value="all">Все подкатегории</option>${subcategories.map(c => `<option value="${escapeAttr(c.id)}" ${c.id === subcategory ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}</select></label>
       <label class="field"><span>Уровень</span><select data-lib-level>${['all','budget','standard','premium','expert','custom'].map(v => `<option value="${escapeAttr(v)}" ${v === level ? 'selected' : ''}>${v === 'all' ? 'Все уровни' : v}</option>`).join('')}</select></label>
       <label class="field"><span>Валюта</span><select data-lib-currency>${['all','RUB','USD','EUR','CNY'].map(v => `<option value="${escapeAttr(v)}" ${v === currency ? 'selected' : ''}>${v === 'all' ? 'Все валюты' : v}</option>`).join('')}</select></label>

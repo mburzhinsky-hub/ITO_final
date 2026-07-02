@@ -22,10 +22,12 @@ export function StepNav(project) {
 function stepStatus(id, project, warnings) {
   if (!project) return id === 'projects' ? 'ok' : 'locked';
   if (id === 'projects') return 'ok';
-  if (id === 'passport') return warnings.some(w => w.type === 'data' && w.severity === 'error') ? 'danger' : 'ok';
+  if (id === 'passport') return warnings.some(w => w.type === 'data' && isCritical(w)) ? 'danger' : 'ok';
   if (id === 'zones') return project.zones?.length ? 'ok' : 'warn';
   if (id === 'estimate') return project.estimateItems?.length ? 'ok' : 'warn';
-  if (id === 'check') return warnings.some(w => w.severity === 'error') ? 'danger' : warnings.length ? 'warn' : 'ok';
-  if (id === 'proposal') return warnings.some(w => w.severity === 'error') ? 'warn' : 'ok';
+  if (id === 'check') return warnings.some(w => isCritical(w)) ? 'danger' : warnings.length ? 'warn' : 'ok';
+  if (id === 'proposal') return warnings.some(w => isCritical(w)) ? 'warn' : 'ok';
   return '';
 }
+
+function isCritical(warning = {}) { return warning.severity === 'critical' || warning.severity === 'error'; }

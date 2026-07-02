@@ -3,7 +3,7 @@ import { PageHeader } from '../components/PageHeader.js';
 import { KpiStrip } from '../components/KpiStrip.js';
 import { GroupedEstimateTable } from '../components/GroupedEstimateTable.js';
 import { BudgetStatus } from '../components/BudgetStatus.js';
-import { ensureProject, persistProject } from '../app/state.js';
+import { ensureProject, persistProject, getUiMode } from '../app/state.js';
 import { createEstimateItem } from '../engine/projectFactory.js';
 import { generateEstimateFromZones } from '../engine/estimate.js';
 import { calculateProjectTotals } from '../engine/pricing.js';
@@ -11,7 +11,7 @@ import { formatMoney } from '../utils/format.js';
 import { toast } from '../utils/dom.js';
 
 export function EstimatePage(root) {
-  const p = ensureProject(); const t = calculateProjectTotals(p); const q = new URLSearchParams(location.hash.split('?')[1] || ''); const mode = q.get('mode') === 'detailed' ? 'detailed' : 'compact';
+  const p = ensureProject(); const t = calculateProjectTotals(p); const uiMode = getUiMode(); const q = new URLSearchParams(location.hash.split('?')[1] || ''); const mode = uiMode === 'engineering' && q.get('mode') === 'detailed' ? 'detailed' : 'compact';
   root.innerHTML = AppLayout(`${PageHeader({ title: 'Смета', description: 'Рабочая таблица расчёта. Компактный режим — для пресейла, подробный — для проверки закупки.', actions: '<button class="btn primary" data-generate="replace">Сгенерировать по зонам</button><button class="btn ghost" data-add-manual>Добавить ручную строку</button><a class="btn ghost" href="#/library">Добавить из библиотеки</a><button class="btn ghost" data-generate="recalculate-derived">Пересчитать derived</button>' })}
   ${KpiStrip([
     { label: 'Себестоимость', value: formatMoney(t.subtotalCost) },
@@ -20,7 +20,7 @@ export function EstimatePage(root) {
     { label: 'Прибыль', value: formatMoney(t.profit) },
     { label: 'Отклонение от бюджета', value: budgetDelta(t), tone: t.targetBudgetStatus === 'over' ? 'warn' : 'ok' }
   ])}
-  <div class="estimateToolbar"><div class="actions"><a class="btn ${mode === 'compact' ? 'primary' : 'ghost'} small" href="#/estimate?mode=compact">Компактный</a><a class="btn ${mode === 'detailed' ? 'primary' : 'ghost'} small" href="#/estimate?mode=detailed">Подробный</a></div><div class="actions"><button class="btn ghost small" data-generate="append">Дополнить</button><button class="btn ghost small" data-save>Сохранить</button></div></div>
+  <div class="estimateToolbar"><div class="actions">${uiMode === 'engineering' ? `<a class="btn ${mode === 'compact' ? 'primary' : 'ghost'} small" href="#/estimate?mode=compact">Компактный</a><a class="btn ${mode === 'detailed' ? 'primary' : 'ghost'} small" href="#/estimate?mode=detailed">Подробный</a>` : '<span class="badge ok">Быстрый пресейл</span><span class="muted smallText">Технические поля скрыты.</span>'}</div><div class="actions"><button class="btn ghost small" data-generate="append">Дополнить</button><button class="btn ghost small" data-save>Сохранить</button></div></div>
   ${BudgetStatus(p)}<div class="separator"></div>${GroupedEstimateTable(p, mode)}`);
   bindLayoutActions(root); bind(root,p);
 }

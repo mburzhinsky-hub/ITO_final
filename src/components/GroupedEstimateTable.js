@@ -19,16 +19,28 @@ export function GroupedEstimateTable(project, mode = 'compact') {
 
 function header(mode) {
   const compact = '<tr><th>Зона</th><th>Позиция</th><th>Категория</th><th>Кол-во</th><th>Цена</th><th>Сумма</th><th></th></tr>';
-  const detailed = '<tr><th>Зона</th><th>Позиция</th><th>Категория</th><th>Ед.</th><th>Кол-во</th><th>Цена</th><th>Валюта</th><th>Источник</th><th>Комментарий</th><th>Сумма</th><th></th></tr>';
+  const detailed = '<tr><th>Зона</th><th>Позиция</th><th>Категория</th><th>Ед.</th><th>Кол-во</th><th>Цена</th><th>Валюта</th><th>Источник</th><th>Role fit</th><th>AV-роль</th><th>Комментарий</th><th>Сумма</th><th></th></tr>';
   return mode === 'detailed' ? detailed : compact;
 }
 function row(item, zoneName, settings, mode) {
   const sum = formatMoney(itemCostRub(item, settings));
   const sourceBadge = sourceBadgeHtml(item);
   if (mode === 'detailed') return `<tr>
-    <td>${escapeHtml(zoneName(item.zoneId))}</td><td><input data-item-field="name" data-item-id="${escapeAttr(item.id)}" value="${escapeAttr(item.name)}"></td><td><input data-item-field="category" data-item-id="${escapeAttr(item.id)}" value="${escapeAttr(item.category)}"></td><td><input data-item-field="unit" data-item-id="${escapeAttr(item.id)}" value="${escapeAttr(item.unit)}"></td><td><input type="number" step="0.1" data-item-field="qty" data-item-id="${escapeAttr(item.id)}" value="${item.qty}"></td><td><input type="number" step="1" data-item-field="unitCost" data-item-id="${escapeAttr(item.id)}" value="${item.unitCost}"></td><td><select data-item-field="currency" data-item-id="${escapeAttr(item.id)}"><option value="RUB" ${item.currency==='RUB'?'selected':''}>RUB</option><option value="USD" ${item.currency==='USD'?'selected':''}>USD</option></select></td><td>${sourceBadge}</td><td><input data-item-field="note" data-item-id="${escapeAttr(item.id)}" value="${escapeAttr(item.note || '')}"></td><td class="money">${sum}</td><td><button class="btn danger small" data-item-delete="${escapeAttr(item.id)}">Удалить</button></td>
+    <td>${escapeHtml(zoneName(item.zoneId))}</td><td><input data-item-field="name" data-item-id="${escapeAttr(item.id)}" value="${escapeAttr(item.name)}"></td><td><input data-item-field="category" data-item-id="${escapeAttr(item.id)}" value="${escapeAttr(item.category)}"></td><td><input data-item-field="unit" data-item-id="${escapeAttr(item.id)}" value="${escapeAttr(item.unit)}"></td><td><input type="number" step="0.1" data-item-field="qty" data-item-id="${escapeAttr(item.id)}" value="${item.qty}"></td><td><input type="number" step="1" data-item-field="unitCost" data-item-id="${escapeAttr(item.id)}" value="${item.unitCost}"></td><td><select data-item-field="currency" data-item-id="${escapeAttr(item.id)}"><option value="RUB" ${item.currency==='RUB'?'selected':''}>RUB</option><option value="USD" ${item.currency==='USD'?'selected':''}>USD</option></select></td><td>${sourceBadge}</td><td>${roleFitHtml(item)}</td><td>${roleMetaHtml(item)}</td><td><input data-item-field="note" data-item-id="${escapeAttr(item.id)}" value="${escapeAttr(item.note || '')}"></td><td class="money">${sum}</td><td><button class="btn danger small" data-item-delete="${escapeAttr(item.id)}">Удалить</button></td>
   </tr>`;
   return `<tr><td>${escapeHtml(zoneName(item.zoneId))}</td><td><input data-item-field="name" data-item-id="${escapeAttr(item.id)}" value="${escapeAttr(item.name)}"><div class="smallText muted">${sourceBadge}</div></td><td><input data-item-field="category" data-item-id="${escapeAttr(item.id)}" value="${escapeAttr(item.category)}"></td><td><input type="number" step="0.1" data-item-field="qty" data-item-id="${escapeAttr(item.id)}" value="${item.qty}"></td><td><input type="number" step="1" data-item-field="unitCost" data-item-id="${escapeAttr(item.id)}" value="${item.unitCost}"></td><td class="money">${sum}</td><td><button class="btn danger small" data-item-delete="${escapeAttr(item.id)}">Удалить</button></td></tr>`;
+}
+
+
+function roleFitHtml(item = {}) {
+  if (item.roleFitScore === undefined || item.roleFitScore === null) return '<span class="muted smallText">—</span>';
+  const score = Number(item.roleFitScore || 0);
+  const tone = score >= Number(item.roleFitMinScore || 55) ? 'ok' : 'warn';
+  const reason = item.roleFitReason ? `<div class="muted smallText">${escapeHtml(item.roleFitReason)}</div>` : '';
+  return `<span class="badge ${tone}">${score}</span>${reason}`;
+}
+function roleMetaHtml(item = {}) {
+  return `<div class="smallText"><strong>${escapeHtml(item.templateRole || '—')}</strong></div><div class="muted smallText">${escapeHtml(item.replacementGroup || '')}${item.systemGroups?.length ? ` · ${escapeHtml(item.systemGroups.join(', '))}` : ''}</div>`;
 }
 
 function sourceBadgeHtml(item = {}) {
