@@ -189,8 +189,41 @@ function levelDistance(item, scenario = 'base') {
   return Math.abs((target < 0 ? 1 : target) - (level < 0 ? 1 : level));
 }
 
-function selectBestCandidate(candidates, scenario) {
-  return [...candidates].sort((a, b) => levelDistance(a, scenario) - levelDistance(b, scenario) || Number(b.priorityScore || 0) - Number(a.priorityScore || 0) || supplierPriority(b) - supplierPriority(a) || Number(b.unitCost || 0) - Number(a.unitCost || 0))[0];
+function validPriceScore(item = {}) {
+  const price = Number(item.unitCost ?? item.priceRub ?? item.price ?? 0);
+  return Number.isFinite(price) && price > 0 ? 1 : 0;
+}
+
+function candidatePrice(item = {}) {
+  const price = Number(item.unitCost ?? item.priceRub ?? item.price ?? 0);
+  return Number.isFinite(price) && price > 0 ? price : Number.POSITIVE_INFINITY;
+}
+
+function medianValidPrice(candidates = []) {
+  const prices = candidates.map(candidatePrice).filter(Number.isFinite).sort((a, b) => a - b);
+  if (!prices.length) return 0;
+  const middle = Math.floor(prices.length / 2);
+  return prices.length % 2 ? prices[middle] : (prices[middle - 1] + prices[middle]) / 2;
+}
+
+function priceDistanceFromMedian(item = {}, median = 0) {
+  const price = candidatePrice(item);
+  if (!Number.isFinite(price)) return Number.MAX_SAFE_INTEGER;
+  return Math.abs(price - median);
+}
+
+export function selectBestCandidate(candidates = [], scenario) {
+  if (!candidates.length) return undefined;
+  const median = medianValidPrice(candidates);
+  return [...candidates].sort((a, b) =>
+    levelDistance(a, scenario) - levelDistance(b, scenario)
+    || Number(b.priorityScore || 0) - Number(a.priorityScore || 0)
+    || supplierPriority(b) - supplierPriority(a)
+    || validPriceScore(b) - validPriceScore(a)
+    || priceDistanceFromMedian(a, median) - priceDistanceFromMedian(b, median)
+    || candidatePrice(a) - candidatePrice(b)
+    || String(a.name || '').localeCompare(String(b.name || ''), 'ru')
+  )[0];
 }
 
 const CATEGORY_ROLE_MAP = {

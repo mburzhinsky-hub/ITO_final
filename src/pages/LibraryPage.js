@@ -98,13 +98,14 @@ function readState(q) {
     review: q.get('review') || 'all',
     scope: q.get('scope') || 'default',
     supplier: q.get('supplier') || 'all',
-    limit: q.get('limit') || '72'
+    limit: q.get('limit') || '72',
+    advanced: q.get('advanced') === '1'
   };
 }
 
 function equipmentTab(project, settings, state, items, deps, library, total) {
   const shown = Math.min(total, Number(state.limit || 72));
-  return `${CatalogQualityFilters({ scope: state.scope, items: library })}${LibraryFilters({ ...state, zones: project.zones || [], suppliers: supplierMeta?.suppliers || [] })}
+  return `${state.advanced ? CatalogQualityFilters({ scope: state.scope, items: library }) : ''}${LibraryFilters({ ...state, zones: project.zones || [], suppliers: supplierMeta?.suppliers || [], advanced: state.advanced })}
     <div class="notice"><strong>Показано ${shown} из ${total}</strong><p>Каталог не рендерит десятки тысяч карточек сразу. Для supplier-позиций по умолчанию видны AV-оборудование, AV-инфраструктура и работы/услуги.</p>${total > shown ? `<div class="actions"><button class="btn ghost small" data-show-more>Показать ещё</button></div>` : ''}</div>
     ${deps.length ? `<div class="notice warn"><strong>В проекте есть незакрытые зависимости: ${deps.length}</strong><p>Откройте проверку или добавьте fallback-позиции вручную.</p><div class="actions">${deps.slice(0, 4).map(dep => `<button class="btn ghost small" data-add-dependency-fallback="${dep.id}">${dep.fallbackName}</button>`).join('')}<a class="btn ghost small" href="#/check">Проверка</a></div></div>` : ''}
     <div class="separator"></div>${items.length ? `<div class="libraryGrid">${items.map(item => EquipmentCard(item, settings, library)).join('')}</div>` : EmptyState({ title: 'Ничего не найдено', text: 'Сбросьте фильтры, выберите поставщика или загрузите полный прайс.', actions: '<button class="btn ghost" data-reset-library>Сбросить фильтры</button><button class="btn primary" data-add-manual-lib>Добавить ручную позицию</button>' })}`;
@@ -122,7 +123,7 @@ function supplierPanel(meta, status, state) {
 }
 
 function templatesTab(state, templates) {
-  return `${LibraryFilters({ ...state, zones: [], suppliers: supplierMeta?.suppliers || [] })}<div class="separator"></div>${InstallationTemplateList(templates)}`;
+  return `${LibraryFilters({ ...state, zones: [], suppliers: supplierMeta?.suppliers || [], advanced: state.advanced })}<div class="separator"></div>${InstallationTemplateList(templates)}`;
 }
 
 function qualityTab(quality, deps, relevanceReport) {
@@ -206,13 +207,21 @@ function bind(root, p, state, library) {
       ['q', '[data-lib-search]'], ['category', '[data-lib-category]'], ['subcategory', '[data-lib-subcategory]'], ['level', '[data-lib-level]'],
       ['currency', '[data-lib-currency]'], ['price', '[data-lib-price]'], ['projectType', '[data-lib-project-type]'], ['zoneCategory', '[data-lib-zone-category]'], ['review', '[data-lib-review]'], ['scope', '[data-lib-scope]'], ['supplier', '[data-lib-supplier]']
     ];
-    fields.forEach(([key, selector]) => { const value = root.querySelector(selector)?.value || (key === 'q' ? '' : 'all'); if (value && !(key !== 'q' && value === 'all') && !(key === 'scope' && value === 'default')) params.set(key, value); });
+    fields.forEach(([key, selector]) => {
+      const element = root.querySelector(selector);
+      const fallback = key === 'q' ? '' : key === 'scope' ? 'default' : 'all';
+      const value = element ? element.value : (current.get(key) || fallback);
+      if (value && !(key !== 'q' && value === 'all') && !(key === 'scope' && value === 'default')) params.set(key, value);
+    });
+    const advancedValue = patch.advanced ?? current.get('advanced');
+    if (advancedValue === '1') params.set('advanced', '1');
     Object.entries(patch).forEach(([key, value]) => { if (value === null) params.delete(key); else params.set(key, value); });
     location.hash = `#/library?${params.toString()}`;
   };
   root.querySelectorAll('[data-lib-category],[data-lib-subcategory],[data-lib-level],[data-lib-currency],[data-lib-price],[data-lib-project-type],[data-lib-zone-category],[data-lib-review],[data-lib-scope],[data-lib-supplier]').forEach(el => el.addEventListener('change', () => updateHash()));
   root.querySelector('[data-lib-search]')?.addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => updateHash(), 300); });
   root.querySelector('[data-load-all-suppliers]')?.addEventListener('click', () => updateHash({ loadSuppliers: 'all' }));
+  root.querySelector('[data-toggle-library-advanced]')?.addEventListener('click', () => updateHash({ advanced: state.advanced ? null : '1' }));
   root.querySelector('[data-show-more]')?.addEventListener('click', () => updateHash({ limit: String(Number(state.limit || 72) + 72) }));
   root.querySelector('[data-reset-library]')?.addEventListener('click', () => { location.hash = '#/library'; });
   root.querySelector('[data-add-manual-lib]')?.addEventListener('click', () => { p.estimateItems.push(createEstimateItem({ name: 'Ручная позиция', category: 'Оборудование', currency: 'RUB', source: 'manual', isManual: true, note: 'добавлено из пустого состояния библиотеки' })); persistProject(); toast('Ручная позиция добавлена'); location.hash = '#/estimate?mode=detailed'; });

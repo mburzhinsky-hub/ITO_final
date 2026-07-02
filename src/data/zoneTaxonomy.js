@@ -112,7 +112,7 @@ const DEFAULT_TEMPLATES = {
   conference: ['conference-hall','stage','broadcast-zone','director-control-room','server-av-rack'],
   retail: ['showroom','digital-signage-zone','product-demo-zone','interactive-kiosk','server-av-rack'],
   education: ['classroom','lecture-hall-education','hybrid-classroom','lecture-recording-zone','server-av-rack'],
-  control: ['control-room','situation-center','monitoring-video-wall','operator-workplace','server-av-rack'],
+  control: ['dispatch-room','situation-center','monitoring-video-wall','operator-workplace','server-av-rack'],
   hospitality: ['hotel-lobby','hotel-conference-hall','background-audio','digital-menu-board','server-av-rack'],
   sport: ['sports-hall','media-screen-sport','fan-zone','commentary-booth','server-av-rack'],
   event: ['conference-hall','stage','led-backdrop','broadcast-zone','backstage'],

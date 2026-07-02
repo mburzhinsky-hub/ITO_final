@@ -13,6 +13,23 @@ function readRuntimeSettings() {
 export function roundMoney(value) { return Math.round(num(value)); }
 export function roundPct(value) { return Math.round(num(value) * 100) / 100; }
 
+function positiveManualNumber(...values) {
+  for (const value of values) {
+    if (value === '' || value === null || value === undefined) continue;
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return null;
+}
+
+export function resolveComplexityCoef(project = {}) {
+  return positiveManualNumber(project.settingsOverrides?.complexityManual, project.passport?.complexityManual) ?? calculateComplexity(project);
+}
+
+export function resolveLogisticsCoef(project = {}) {
+  return positiveManualNumber(project.settingsOverrides?.logisticsManual, project.passport?.logisticsManual) ?? calculateLogistics(project);
+}
+
 export function itemCostRub(item, settings = DEFAULT_SETTINGS) {
   return roundMoney(num(item.qty, 1) * itemUnitCostRub(item, settings));
 }
@@ -36,8 +53,8 @@ export function calculateProjectTotals(project = {}, settingsInput = null) {
   const rates = settings.laborRates || DEFAULT_SETTINGS.laborRates;
   const items = project.estimateItems || [];
   const equipmentCost = items.reduce((sum, item) => sum + itemCostRub(item, settings), 0);
-  const complexity = calculateComplexity(project);
-  const logisticsCoef = calculateLogistics(project);
+  const complexity = resolveComplexityCoef(project);
+  const logisticsCoef = resolveLogisticsCoef(project);
   const installCost = roundMoney(equipmentCost * num(rates.installationPct) * complexity);
   const pnrCost = roundMoney(equipmentCost * num(rates.pnrPct) * complexity);
   const contentCost = roundMoney(equipmentCost * num(rates.contentPct) * countFlag(project, 'content'));

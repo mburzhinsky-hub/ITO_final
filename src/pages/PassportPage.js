@@ -47,7 +47,7 @@ export function PassportPage(root) {
     </section>
     <aside class="card projectSideSummary">
       <h3>Сводка</h3>
-      <div class="summaryList"><div><span>Статус</span><strong>${escapeHtml(statusLabel(p.status))}</strong></div><div><span>Зоны</span><strong>${p.zones.length}</strong></div><div><span>Ориентировочная стоимость</span><strong>${formatMoney(totals.salePriceGross)}</strong></div><div><span>Предупреждения</span><strong>${warnings.length}</strong></div></div>
+      <div class="summaryList"><div><span>Статус</span><strong>${escapeHtml(statusLabel(p.status))}</strong></div><div><span>Зоны</span><strong>${p.zones.length}</strong></div><div><span>Ориентировочная стоимость</span><strong data-passport-total-gross>${formatMoney(totals.salePriceGross)}</strong></div><div><span>Предупреждения</span><strong>${warnings.length}</strong></div></div>
       <div data-passport-missing>${missingNotice(missing)}</div>
       ${PrimaryActionBar('<button class="btn primary" data-next>Перейти к зонам</button>')}
     </aside>
@@ -61,10 +61,11 @@ function requiredMissing(p){const list=[]; const customer = String(p.customerNam
 function missingNotice(missing){return missing.length ? `<div class="notice warn"><strong>Не хватает данных</strong><p>${missing.map(escapeHtml).join(', ')}</p></div>` : '<div class="notice ok"><strong>Паспорт заполнен</strong><p>Можно переходить к зонам.</p></div>'}
 function bind(root,p,missing){
   const refreshMissing = () => { const currentMissing = requiredMissing(p); const holder = root.querySelector('[data-passport-missing]'); if(holder) holder.innerHTML = missingNotice(currentMissing); return currentMissing; };
-  root.querySelectorAll('[data-root-field]').forEach(el=>el.addEventListener('input',()=>{p[el.dataset.rootField]=el.value; if (el.dataset.rootField === 'customerName') p.passport.customerName = el.value; refreshMissing();}));
-  root.querySelectorAll('[data-passport-field]').forEach(el=>el.addEventListener('input',()=>{const k=el.dataset.passportField; if(k === 'targetBudgetIncludesVat') p.passport[k] = el.value === 'true'; else p.passport[k]=el.type==='number'?Number(el.value):el.value; refreshMissing();}));
-  root.querySelectorAll('[data-override-field]').forEach(el=>el.addEventListener('input',()=>{p.settingsOverrides ||= {}; p.settingsOverrides[el.dataset.overrideField]=el.value === '' ? undefined : Number(el.value);}));
-  root.querySelectorAll('[data-labor-field]').forEach(el=>el.addEventListener('input',()=>{p.settingsOverrides ||= {}; p.settingsOverrides.laborRates ||= {}; p.settingsOverrides.laborRates[el.dataset.laborField]=el.value === '' ? undefined : Number(el.value);}));
+  const refreshTotals = () => { const holder = root.querySelector('[data-passport-total-gross]'); if(holder) holder.textContent = formatMoney(calculateProjectTotals(p).salePriceGross); };
+  root.querySelectorAll('[data-root-field]').forEach(el=>el.addEventListener('input',()=>{p[el.dataset.rootField]=el.value; if (el.dataset.rootField === 'customerName') p.passport.customerName = el.value; refreshMissing(); refreshTotals();}));
+  root.querySelectorAll('[data-passport-field]').forEach(el=>el.addEventListener('input',()=>{const k=el.dataset.passportField; if(k === 'targetBudgetIncludesVat') p.passport[k] = el.value === 'true'; else p.passport[k]=el.type==='number'?Number(el.value):el.value; refreshMissing(); refreshTotals();}));
+  root.querySelectorAll('[data-override-field]').forEach(el=>el.addEventListener('input',()=>{p.settingsOverrides ||= {}; p.settingsOverrides[el.dataset.overrideField]=el.value === '' ? undefined : Number(el.value); refreshTotals();}));
+  root.querySelectorAll('[data-labor-field]').forEach(el=>el.addEventListener('input',()=>{p.settingsOverrides ||= {}; p.settingsOverrides.laborRates ||= {}; p.settingsOverrides.laborRates[el.dataset.laborField]=el.value === '' ? undefined : Number(el.value); refreshTotals();}));
   root.querySelector('[data-save]')?.addEventListener('click',()=>{persistProject(); toast('Паспорт сохранён');});
   root.querySelectorAll('[data-next]').forEach(btn => btn.addEventListener('click',()=>{const currentMissing = refreshMissing(); persistProject(); if(currentMissing.length) toast(`Заполните: ${currentMissing.join(', ')}`); else navigate('zones');}));
 }
